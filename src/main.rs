@@ -62,6 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 title: utils::clean_title(raw_title),
                 artist: tag.artist().unwrap_or("Unknown Artist").to_string(),
                 album: tag.album_title().unwrap_or("Unknown Album").to_string(),
+                year: tag.year().unwrap_or(0000).to_string(),
                 duration,
             }
         } else {
@@ -69,6 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 title: utils::clean_title(&fallback_name),
                 artist: "Unknown Artist".to_string(),
                 album: "Unknown Album".to_string(),
+                year: "Unknown Year".to_string(),
                 duration,
             }
         }

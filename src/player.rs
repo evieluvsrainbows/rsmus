@@ -12,6 +12,7 @@ pub struct TrackMetadata {
     pub title: String,
     pub artist: String,
     pub album: String,
+    pub year: String,
     pub duration: Duration,
 }
 
@@ -101,7 +102,7 @@ impl MusicPlayer {
         }
         if self.current_index < self.tracks.len() {
             let t = &self.tracks[self.current_index];
-            format!("{} by {} on {}", t.title, t.artist, t.album)
+            format!("{} by {} on {} ({})", t.title, t.artist, t.album, t.year)
         } else {
             "Playback Finished".to_string()
         }
