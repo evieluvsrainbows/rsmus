@@ -117,6 +117,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             mp.player.append(source);
         }
         mp.track_start_time = Instant::now();
+
+        if let Some(track) = mp.tracks.get(mp.current_index) {
+            utils::update_terminal_title(&track.title, &track.artist, &track.album, &track.year, mp.is_paused);
+        }
     }
 
     let initial_info = music_player.lock().unwrap().current_track_info();
@@ -143,24 +147,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     let player_for_thread = Arc::clone(&music_player);
     let sink = siv.cb_sink().clone();
     thread::spawn(move || {
-        let mut previous_index = 0;
+        let mut previous_index = usize::MAX;
+        let mut previous_paused = false;
+
         loop {
             thread::sleep(Duration::from_millis(150));
 
             let mut mp = player_for_thread.lock().unwrap();
             let current_idx = mp.current_index;
+            let current_paused = mp.is_paused;
             let (current_sec, total_sec) = mp.get_current_progress();
 
             if current_sec >= total_sec && total_sec > 0 && current_idx < mp.tracks.len() - 1 {
                 mp.advance_track();
-            } else if !mp.player.empty() && current_idx != previous_index {
+            }
+
+            if current_idx != previous_index || current_paused != previous_paused {
+                if let Some(track) = mp.tracks.get(current_idx) {
+                    utils::update_terminal_title(&track.title, &track.artist, &track.album, &track.year, current_paused);
+                }
                 previous_index = current_idx;
+                previous_paused = current_paused;
             }
 
             let track_text = format!("{}", mp.current_track_info());
             let (current, total) = mp.get_current_progress();
             let time_text = format!("{} / {}", utils::format_time(current), utils::format_time(total));
-            let indicator_text = if mp.is_paused { "⏸ " } else { "▶ " };
+            let indicator_text = if current_paused { "⏸ " } else { "▶ " };
 
             let _ = sink.send(Box::new(move |s| {
                 s.call_on_name("play_indicator", |view: &mut TextView| {

@@ -1,4 +1,4 @@
-//! Various utilities used by rsmus.
+use std::io::Write;
 
 pub fn format_time(secs: usize) -> String {
     let minutes = secs / 60;
@@ -21,4 +21,12 @@ pub fn clean_title(title: &str) -> String {
     }
 
     cleaned.trim().to_string()
+}
+
+/// Updates the terminal title to reflect current playback status.
+pub fn update_terminal_title(title: &str, artist: &str, album: &str, year: &str, is_paused: bool) {
+    let indicator = if is_paused { "⏸" } else { "▶" };
+    let formatted_title = format!("{} {} by {} ({} - {})", indicator, title, artist, album, year);
+    print!("\x1b]0;{}\x07", formatted_title);
+    let _ = std::io::stdout().flush();
 }
