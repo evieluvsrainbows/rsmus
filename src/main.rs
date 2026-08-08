@@ -118,14 +118,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let music_player = Arc::new(Mutex::new(MusicPlayer::new(playlist, None)?));
     {
         let mut mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
-        for track in &mp.playlist {
+        for track in &mp.queue {
             let file = File::open(&track.path)?;
             let source = Decoder::try_from(std::io::BufReader::new(file))?;
             mp.player.append(source);
         }
         mp.track_start_time = Instant::now();
 
-        if let Some(track) = mp.playlist.get(mp.current_index) {
+        if let Some(track) = mp.queue.get(mp.current_index) {
             let t = &track.metadata;
             utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, mp.is_paused);
         }
@@ -135,7 +135,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let initial_duration = music_player
         .lock()
         .map_err(|_| "Poisoned mutex")?
-        .playlist
+        .queue
         .get(0)
         .map(|t| t.metadata.duration.as_secs() as usize)
         .unwrap_or(100);
@@ -176,12 +176,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             let current_paused = mp.is_paused;
             let (current_sec, total_sec) = mp.get_current_progress();
 
-            if current_sec >= total_sec && total_sec > 0 && current_idx + 1 < mp.playlist.len() {
+            if current_sec >= total_sec && total_sec > 0 && current_idx + 1 < mp.queue.len() {
                 mp.advance_track();
             }
 
             if current_idx != previous_index || current_paused != previous_paused {
-                if let Some(track) = mp.playlist.get(current_idx) {
+                if let Some(track) = mp.queue.get(current_idx) {
                     let t = &track.metadata;
                     utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, current_paused);
                 }

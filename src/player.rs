@@ -26,7 +26,7 @@ pub struct Track {
 pub struct MusicPlayer {
     _handle: MixerDeviceSink,
     pub player: RodioPlayer,
-    pub playlist: Vec<Track>,
+    pub queue: Vec<Track>,
     pub current_index: usize,
     pub track_start_time: Instant,
     pub is_paused: bool,
@@ -34,10 +34,10 @@ pub struct MusicPlayer {
 }
 
 impl MusicPlayer {
-    pub fn new(playlist: Vec<Track>, allowed_base_dir: Option<&Path>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(queue: Vec<Track>, allowed_base_dir: Option<&Path>) -> Result<Self, Box<dyn Error>> {
         if let Some(base) = allowed_base_dir {
             let canonical_base = base.canonicalize()?;
-            for track in &playlist {
+            for track in &queue {
                 let canonical_path = track.path.canonicalize()?;
                 if !canonical_path.starts_with(&canonical_base) {
                     return Err(format!("Security error: Path traversal detected: {:?}", track.path).into());
@@ -51,7 +51,7 @@ impl MusicPlayer {
         Ok(Self {
             _handle: handle,
             player,
-            playlist,
+            queue,
             current_index: 0,
             track_start_time: Instant::now(),
             is_paused: false,
@@ -70,7 +70,7 @@ impl MusicPlayer {
         self.current_index = self.current_index.saturating_sub(1);
         self.player.stop();
 
-        if let Some(track) = self.playlist.get(self.current_index) {
+        if let Some(track) = self.queue.get(self.current_index) {
             let file = File::open(&track.path)?;
             let source = Decoder::try_from(BufReader::new(file))?;
             self.player.append(source);
@@ -101,7 +101,7 @@ impl MusicPlayer {
     }
 
     pub fn advance_track(&mut self) {
-        let max_index = self.playlist.len().saturating_sub(1);
+        let max_index = self.queue.len().saturating_sub(1);
         self.current_index = (self.current_index + 1).min(max_index);
         self.track_start_time = Instant::now();
         self.paused_elapsed = Duration::ZERO;
@@ -109,10 +109,10 @@ impl MusicPlayer {
     }
 
     pub fn current_track_info(&self) -> String {
-        if let Some(track) = self.playlist.get(self.current_index) {
+        if let Some(track) = self.queue.get(self.current_index) {
             let t = &track.metadata;
             format!("{} by {} on {} ({})", t.title, t.artist, t.album, t.year)
-        } else if self.playlist.is_empty() {
+        } else if self.queue.is_empty() {
             "No tracks loaded".to_string()
         } else {
             "Playback Finished".to_string()
@@ -120,7 +120,7 @@ impl MusicPlayer {
     }
 
     pub fn get_current_progress(&self) -> (usize, usize) {
-        let Some(track) = self.playlist.get(self.current_index) else {
+        let Some(track) = self.queue.get(self.current_index) else {
             return (0, 100);
         };
 
