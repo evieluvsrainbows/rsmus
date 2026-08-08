@@ -17,7 +17,6 @@ pub struct TrackMetadata {
     pub duration: Duration,
 }
 
-// Combined struct to eliminate vector length mismatch risks
 #[derive(Clone)]
 pub struct Track {
     pub metadata: TrackMetadata,
@@ -36,7 +35,6 @@ pub struct MusicPlayer {
 
 impl MusicPlayer {
     pub fn new(playlist: Vec<Track>, allowed_base_dir: Option<&Path>) -> Result<Self, Box<dyn Error>> {
-        // Optional security check: Validate paths against a safe base directory
         if let Some(base) = allowed_base_dir {
             let canonical_base = base.canonicalize()?;
             for track in &playlist {
@@ -72,7 +70,6 @@ impl MusicPlayer {
         self.current_index = self.current_index.saturating_sub(1);
         self.player.stop();
 
-        // Safely play only the current track instead of re-appending the whole queue
         if let Some(track) = self.playlist.get(self.current_index) {
             let file = File::open(&track.path)?;
             let source = Decoder::try_from(BufReader::new(file))?;
