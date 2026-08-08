@@ -51,17 +51,12 @@ impl MusicPlayer {
     }
 
     pub fn previous(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.current_index > 0 {
-            self.current_index -= 1;
-        } else {
-            self.current_index = 0;
-        }
-
+        self.current_index = self.current_index.saturating_sub(1);
         self.player.stop();
 
         for filepath in self.paths.iter().skip(self.current_index) {
             let file = File::open(filepath)?;
-            let source = Decoder::try_from(file)?;
+            let source = Decoder::try_from(std::io::BufReader::new(file))?;
             self.player.append(source);
         }
 
@@ -90,39 +85,36 @@ impl MusicPlayer {
     }
 
     pub fn advance_track(&mut self) {
-        self.current_index = (self.current_index + 1).min(self.tracks.len().saturating_sub(1));
+        let max_index = self.tracks.len().saturating_sub(1);
+        self.current_index = (self.current_index + 1).min(max_index);
         self.track_start_time = Instant::now();
         self.paused_elapsed = Duration::ZERO;
         self.is_paused = false;
     }
 
     pub fn current_track_info(&self) -> String {
-        if self.tracks.is_empty() {
-            return "No tracks loaded".to_string();
-        }
-        if self.current_index < self.tracks.len() {
-            let t = &self.tracks[self.current_index];
+        if let Some(t) = self.tracks.get(self.current_index) {
             format!("{} by {} on {} ({})", t.title, t.artist, t.album, t.year)
+        } else if self.tracks.is_empty() {
+            "No tracks loaded".to_string()
         } else {
             "Playback Finished".to_string()
         }
     }
 
     pub fn get_current_progress(&self) -> (usize, usize) {
-        if self.tracks.is_empty() || self.current_index >= self.tracks.len() {
+        let Some(track) = self.tracks.get(self.current_index) else {
             return (0, 100);
-        }
+        };
 
-        let total_dur = self.tracks[self.current_index].duration;
-        if total_dur.as_secs() == 0 {
+        let total_secs = track.duration.as_secs() as usize;
+        if total_secs == 0 {
             return (0, 100);
         }
 
         let elapsed = if self.is_paused { self.paused_elapsed } else { self.track_start_time.elapsed() };
 
         let current_secs = elapsed.as_secs() as usize;
-        let total_secs = total_dur.as_secs() as usize;
-
         (current_secs.min(total_secs), total_secs)
     }
 }
