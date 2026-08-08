@@ -23,10 +23,21 @@ pub fn clean_title(title: &str) -> String {
     cleaned.trim().to_string()
 }
 
-/// Updates the terminal title to reflect current playback status.
+/// Sanitizes input to remove control characters that could break out of terminal escape sequences.
+fn sanitize_terminal_string(input: &str) -> String {
+    input.chars().filter(|c| !c.is_control() || *c == ' ').collect()
+}
+
+/// Updates the terminal title to reflect current playback status safely.
 pub fn update_terminal_title(title: &str, artist: &str, album: &str, year: &str, is_paused: bool) {
     let indicator = if is_paused { "⏸" } else { "▶" };
-    let formatted_title = format!("{} {} by {} ({} - {})", indicator, title, artist, album, year);
+
+    let safe_title = sanitize_terminal_string(title);
+    let safe_artist = sanitize_terminal_string(artist);
+    let safe_album = sanitize_terminal_string(album);
+    let safe_year = sanitize_terminal_string(year);
+
+    let formatted_title = format!("{} {} by {} ({} - {})", indicator, safe_title, safe_artist, safe_album, safe_year);
     print!("\x1b]0;{}\x07", formatted_title);
     let _ = std::io::stdout().flush();
 }

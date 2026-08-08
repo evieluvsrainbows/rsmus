@@ -1,7 +1,8 @@
 use std::{
     error::Error,
     fs::File,
-    path::PathBuf,
+    io::BufReader,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -16,11 +17,17 @@ pub struct TrackMetadata {
     pub duration: Duration,
 }
 
+// Combined struct to eliminate vector length mismatch risks
+#[derive(Clone)]
+pub struct Track {
+    pub metadata: TrackMetadata,
+    pub path: PathBuf,
+}
+
 pub struct MusicPlayer {
     _handle: MixerDeviceSink,
     pub player: RodioPlayer,
-    pub tracks: Vec<TrackMetadata>,
-    pub paths: Vec<PathBuf>,
+    pub playlist: Vec<Track>,
     pub current_index: usize,
     pub track_start_time: Instant,
     pub is_paused: bool,
@@ -28,14 +35,25 @@ pub struct MusicPlayer {
 }
 
 impl MusicPlayer {
-    pub fn new(tracks: Vec<TrackMetadata>, paths: Vec<PathBuf>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(playlist: Vec<Track>, allowed_base_dir: Option<&Path>) -> Result<Self, Box<dyn Error>> {
+        // Optional security check: Validate paths against a safe base directory
+        if let Some(base) = allowed_base_dir {
+            let canonical_base = base.canonicalize()?;
+            for track in &playlist {
+                let canonical_path = track.path.canonicalize()?;
+                if !canonical_path.starts_with(&canonical_base) {
+                    return Err(format!("Security error: Path traversal detected: {:?}", track.path).into());
+                }
+            }
+        }
+
         let handle = DeviceSinkBuilder::open_default_sink()?;
         let player = RodioPlayer::connect_new(&handle.mixer());
+
         Ok(Self {
             _handle: handle,
             player,
-            tracks,
-            paths,
+            playlist,
             current_index: 0,
             track_start_time: Instant::now(),
             is_paused: false,
@@ -54,9 +72,10 @@ impl MusicPlayer {
         self.current_index = self.current_index.saturating_sub(1);
         self.player.stop();
 
-        for filepath in self.paths.iter().skip(self.current_index) {
-            let file = File::open(filepath)?;
-            let source = Decoder::try_from(std::io::BufReader::new(file))?;
+        // Safely play only the current track instead of re-appending the whole queue
+        if let Some(track) = self.playlist.get(self.current_index) {
+            let file = File::open(&track.path)?;
+            let source = Decoder::try_from(BufReader::new(file))?;
             self.player.append(source);
         }
 
@@ -85,7 +104,7 @@ impl MusicPlayer {
     }
 
     pub fn advance_track(&mut self) {
-        let max_index = self.tracks.len().saturating_sub(1);
+        let max_index = self.playlist.len().saturating_sub(1);
         self.current_index = (self.current_index + 1).min(max_index);
         self.track_start_time = Instant::now();
         self.paused_elapsed = Duration::ZERO;
@@ -93,9 +112,10 @@ impl MusicPlayer {
     }
 
     pub fn current_track_info(&self) -> String {
-        if let Some(t) = self.tracks.get(self.current_index) {
+        if let Some(track) = self.playlist.get(self.current_index) {
+            let t = &track.metadata;
             format!("{} by {} on {} ({})", t.title, t.artist, t.album, t.year)
-        } else if self.tracks.is_empty() {
+        } else if self.playlist.is_empty() {
             "No tracks loaded".to_string()
         } else {
             "Playback Finished".to_string()
@@ -103,18 +123,18 @@ impl MusicPlayer {
     }
 
     pub fn get_current_progress(&self) -> (usize, usize) {
-        let Some(track) = self.tracks.get(self.current_index) else {
+        let Some(track) = self.playlist.get(self.current_index) else {
             return (0, 100);
         };
 
-        let total_secs = track.duration.as_secs() as usize;
+        let total_secs = track.metadata.duration.as_secs() as usize;
         if total_secs == 0 {
             return (0, 100);
         }
 
         let elapsed = if self.is_paused { self.paused_elapsed } else { self.track_start_time.elapsed() };
-
         let current_secs = elapsed.as_secs() as usize;
+
         (current_secs.min(total_secs), total_secs)
     }
 }

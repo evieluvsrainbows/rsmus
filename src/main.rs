@@ -15,13 +15,13 @@ use rodio::{Decoder, Source};
 use std::{
     error::Error,
     fs::File,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
-use player::{MusicPlayer, TrackMetadata};
+use player::{MusicPlayer, Track, TrackMetadata};
 
 #[derive(Parser, Debug)]
 #[clap(about, version)]
@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let input = args.input;
     let input_path = PathBuf::from(&input);
 
-    let supported_extension = |path: &std::path::Path| -> bool {
+    let supported_extension = |path: &Path| -> bool {
         path.extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| {
@@ -107,26 +107,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         paths_to_append.push(input_path);
     }
 
-    let track_metadata_list: Vec<TrackMetadata> = paths_to_append.par_iter().map(|filepath| extract_metadata(filepath)).collect();
-    let music_player = Arc::new(Mutex::new(MusicPlayer::new(track_metadata_list, paths_to_append)?));
+    let playlist: Vec<Track> = paths_to_append
+        .par_iter()
+        .map(|filepath| {
+            let metadata = extract_metadata(filepath);
+            Track { metadata, path: filepath.clone() }
+        })
+        .collect();
+
+    let music_player = Arc::new(Mutex::new(MusicPlayer::new(playlist, None)?));
     {
-        let mut mp = music_player.lock().unwrap();
-        for filepath in &mp.paths {
-            let file = File::open(filepath)?;
-            let source = Decoder::try_from(file)?;
+        let mut mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
+        for track in &mp.playlist {
+            let file = File::open(&track.path)?;
+            let source = Decoder::try_from(std::io::BufReader::new(file))?;
             mp.player.append(source);
         }
         mp.track_start_time = Instant::now();
 
-        if let Some(track) = mp.tracks.get(mp.current_index) {
-            utils::update_terminal_title(&track.title, &track.artist, &track.album, &track.year, mp.is_paused);
+        if let Some(track) = mp.playlist.get(mp.current_index) {
+            let t = &track.metadata;
+            utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, mp.is_paused);
         }
     }
 
-    let initial_info = music_player.lock().unwrap().current_track_info();
-    let initial_duration = music_player.lock().unwrap().tracks.get(0).map(|t| t.duration.as_secs() as usize).unwrap_or(100);
-    let initial_time_text = format!("0:00 / {}", utils::format_time(initial_duration));
+    let initial_info = music_player.lock().map_err(|_| "Poisoned mutex")?.current_track_info();
+    let initial_duration = music_player
+        .lock()
+        .map_err(|_| "Poisoned mutex")?
+        .playlist
+        .get(0)
+        .map(|t| t.metadata.duration.as_secs() as usize)
+        .unwrap_or(100);
 
+    let initial_time_text = format!("0:00 / {}", utils::format_time(initial_duration));
     let indicator_label = NamedView::new("play_indicator", TextView::new("▶ "));
     let track_label = NamedView::new("track_info", TextView::new(format!("{}", initial_info)));
     let time_label = NamedView::new("time_label", TextView::new(initial_time_text));
@@ -153,18 +167,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         loop {
             thread::sleep(Duration::from_millis(150));
 
-            let mut mp = player_for_thread.lock().unwrap();
+            let mut mp = match player_for_thread.lock() {
+                Ok(guard) => guard,
+                Err(_) => break,
+            };
+
             let current_idx = mp.current_index;
             let current_paused = mp.is_paused;
             let (current_sec, total_sec) = mp.get_current_progress();
 
-            if current_sec >= total_sec && total_sec > 0 && current_idx < mp.tracks.len() - 1 {
+            if current_sec >= total_sec && total_sec > 0 && current_idx + 1 < mp.playlist.len() {
                 mp.advance_track();
             }
 
             if current_idx != previous_index || current_paused != previous_paused {
-                if let Some(track) = mp.tracks.get(current_idx) {
-                    utils::update_terminal_title(&track.title, &track.artist, &track.album, &track.year, current_paused);
+                if let Some(track) = mp.playlist.get(current_idx) {
+                    let t = &track.metadata;
+                    utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, current_paused);
                 }
                 previous_index = current_idx;
                 previous_paused = current_paused;
@@ -174,6 +193,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let (current, total) = mp.get_current_progress();
             let time_text = format!("{} / {}", utils::format_time(current), utils::format_time(total));
             let indicator_text = if current_paused { "⏸ " } else { "▶ " };
+
+            drop(mp);
 
             let _ = sink.send(Box::new(move |s| {
                 s.call_on_name("play_indicator", |view: &mut TextView| {
@@ -190,17 +211,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let player_for_c = Arc::clone(&music_player);
-    siv.add_global_callback('c', move |_| player_for_c.lock().unwrap().play_pause());
+    siv.add_global_callback('c', move |_| {
+        if let Ok(mut mp) = player_for_c.lock() {
+            mp.play_pause();
+        }
+    });
 
     let player_for_prev = Arc::clone(&music_player);
     siv.add_global_callback(Event::Key(Key::Left), move |_| {
-        let _ = player_for_prev.lock().unwrap().previous();
+        if let Ok(mut mp) = player_for_prev.lock() {
+            let _ = mp.previous();
+        }
     });
 
     let player_for_next = Arc::clone(&music_player);
     siv.add_global_callback(Event::Key(Key::Right), move |_| {
-        let mut mp = player_for_next.lock().unwrap();
-        mp.skip();
+        if let Ok(mut mp) = player_for_next.lock() {
+            mp.skip();
+        }
     });
 
     siv.add_global_callback('q', |s| s.quit());
