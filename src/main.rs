@@ -1,6 +1,7 @@
 mod player;
 mod utils;
 
+use audiotags::Tag;
 use clap::Parser;
 use cursive::{
     event::{self, Event, Key},
@@ -9,6 +10,7 @@ use cursive::{
     view::Resizable,
     views::{Dialog, NamedView, TextView},
 };
+use rayon::prelude::*;
 use rodio::{Decoder, Source};
 use std::{
     error::Error,
@@ -40,30 +42,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     siv.set_theme(Theme::terminal_default());
 
     let input = args.input;
-    let mut track_metadata_list = Vec::new();
-    let mut paths_to_append = Vec::new();
+    let input_path = PathBuf::from(&input);
 
-    let tag_parser = audiotags::Tag::default();
+    let supported_extension = |path: &std::path::Path| -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| {
+                let lower = ext.to_lowercase();
+                lower == "flac" || lower == "mp3" || lower == "m4a" || lower == "wav" || lower == "ogg"
+            })
+            .unwrap_or(false)
+    };
 
     let extract_metadata = |filepath: &PathBuf| -> TrackMetadata {
         let fallback_name = filepath.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown File").to_string();
-        let duration = if let Ok(file) = File::open(filepath) {
+        let mut duration = Duration::from_secs(0);
+        if let Ok(file) = File::open(filepath) {
             if let Ok(source) = Decoder::try_from(file) {
-                source.total_duration().unwrap_or(Duration::from_secs(0))
-            } else {
-                Duration::from_secs(0)
+                duration = source.total_duration().unwrap_or(Duration::from_secs(0));
             }
-        } else {
-            Duration::from_secs(0)
-        };
+        }
 
+        let tag_parser = Tag::default();
         if let Ok(tag) = tag_parser.read_from_path(filepath) {
             let raw_title = tag.title().unwrap_or(&fallback_name);
             TrackMetadata {
                 title: utils::clean_title(raw_title),
                 artist: tag.artist().unwrap_or("Unknown Artist").to_string(),
                 album: tag.album_title().unwrap_or("Unknown Album").to_string(),
-                year: tag.year().unwrap_or(0000).to_string(),
+                year: tag.year().map(|y| y.to_string()).unwrap_or_else(|| "Unknown Year".to_string()),
                 duration,
             }
         } else {
@@ -77,51 +84,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    if std::fs::metadata(&input)?.is_dir() {
-        let mut entries: Vec<_> = std::fs::read_dir(&input)?
+    let mut paths_to_append = Vec::new();
+
+    if std::fs::metadata(&input_path)?.is_dir() {
+        let entries: Vec<PathBuf> = std::fs::read_dir(&input_path)?
             .filter_map(Result::ok)
-            .filter(|f| {
-                if let Ok(meta) = f.metadata() {
-                    if meta.is_dir() {
-                        return false;
-                    }
-                }
-                let path_str = f.path().to_string_lossy().to_lowercase();
-                !path_str.ends_with(".jpg") && !path_str.ends_with(".png")
-            })
+            .map(|f| f.path())
+            .filter(|path| path.is_file() && supported_extension(path))
             .collect();
 
-        let has_music_file = entries.iter().any(|f| {
-            let path_str = f.path().to_string_lossy().to_lowercase();
-            path_str.ends_with(".flac") || path_str.ends_with(".m4a") || path_str.ends_with(".mp3") || path_str.ends_with(".wav")
-        });
-
-        if !has_music_file {
-            return Err(format!("No music files found in directory: {}", input).into());
+        if entries.is_empty() {
+            return Err(format!("No supported music files found in directory: {}", input).into());
         }
 
-        entries.sort_by_key(|d| d.path());
-
-        for f in entries {
-            let filepath = f.path();
-            track_metadata_list.push(extract_metadata(&filepath));
-            paths_to_append.push(filepath);
-        }
+        let mut sorted_entries = entries;
+        sorted_entries.sort();
+        paths_to_append = sorted_entries;
     } else {
-        let filepath = PathBuf::from(&input);
-        let path_str = filepath.to_string_lossy().to_lowercase();
-        if !path_str.ends_with(".flac") && !path_str.ends_with(".mp3") && !path_str.ends_with(".m4a") && !path_str.ends_with(".wav") {
+        if !supported_extension(&input_path) {
             return Err(format!("Specified file is not a supported music file: {}", input).into());
         }
-        track_metadata_list.push(extract_metadata(&filepath));
-        paths_to_append.push(filepath);
+        paths_to_append.push(input_path);
     }
 
+    let track_metadata_list: Vec<TrackMetadata> = paths_to_append.par_iter().map(|filepath| extract_metadata(filepath)).collect();
     let music_player = Arc::new(Mutex::new(MusicPlayer::new(track_metadata_list, paths_to_append)?));
     {
         let mut mp = music_player.lock().unwrap();
-        for filepath in mp.paths.clone() {
-            let file = File::open(&filepath)?;
+        for filepath in &mp.paths {
+            let file = File::open(filepath)?;
             let source = Decoder::try_from(file)?;
             mp.player.append(source);
         }
@@ -154,7 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     thread::spawn(move || {
         let mut previous_index = 0;
         loop {
-            thread::sleep(Duration::from_millis(200));
+            thread::sleep(Duration::from_millis(150));
 
             let mut mp = player_for_thread.lock().unwrap();
             let current_idx = mp.current_index;
