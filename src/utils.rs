@@ -6,6 +6,12 @@ pub fn format_time(secs: usize) -> String {
     format!("{}:{:02}", minutes, seconds)
 }
 
+/// Strip various explicit/clean labeling from song titles, in order
+/// to allow for cleaner song titles, as some storefronts include
+/// the "Explicit" or "Clean" labeling in the music metadata. This
+/// allows for cleaner song titles without the user having to go in
+/// and manually update their music metadata to remove the "Explicit"
+/// or "Clean" labeling.
 pub fn clean_title(title: &str) -> String {
     let patterns = ["(explicit)", "[explicit]", "(Explicit)", "[Explicit]", "Explicit", "- Explicit", "(Clean)", "[Clean]"];
 
