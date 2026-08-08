@@ -6,6 +6,7 @@ use cursive::{
     event::{self, Event, Key},
     menu,
     theme::Theme,
+    view::Resizable,
     views::{Dialog, NamedView, TextView},
 };
 use rodio::{Decoder, Source};
@@ -130,13 +131,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     let initial_info = music_player.lock().unwrap().current_track_info();
     let initial_duration = music_player.lock().unwrap().tracks.get(0).map(|t| t.duration.as_secs() as usize).unwrap_or(100);
     let initial_time_text = format!("0:00 / {}", utils::format_time(initial_duration));
+
+    let indicator_label = NamedView::new("play_indicator", TextView::new("▶ "));
+    let track_label = NamedView::new("track_info", TextView::new(format!("{}", initial_info)));
     let time_label = NamedView::new("time_label", TextView::new(initial_time_text));
-    let content_layout = cursive::views::LinearLayout::vertical()
-        .child(NamedView::new("track_info", TextView::new(format!("{}", initial_info))))
-        .child(cursive::views::DummyView)
+
+    let status_bar = cursive::views::LinearLayout::horizontal()
+        .child(indicator_label)
+        .child(track_label)
+        .child(cursive::views::DummyView.full_width())
         .child(time_label);
 
-    siv.add_layer(Dialog::around(content_layout).title("Currently Playing").button("Quit", |s| s.quit()));
+    let root_layout = cursive::views::LinearLayout::vertical()
+        .child(cursive::views::DummyView.full_height())
+        .child(status_bar)
+        .full_screen();
+
+    siv.add_layer(root_layout);
 
     let player_for_thread = Arc::clone(&music_player);
     let sink = siv.cb_sink().clone();
@@ -148,6 +159,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut mp = player_for_thread.lock().unwrap();
             let current_idx = mp.current_index;
             let (current_sec, total_sec) = mp.get_current_progress();
+
             if current_sec >= total_sec && total_sec > 0 && current_idx < mp.tracks.len() - 1 {
                 mp.advance_track();
             } else if !mp.player.empty() && current_idx != previous_index {
@@ -157,7 +169,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             let track_text = format!("{}", mp.current_track_info());
             let (current, total) = mp.get_current_progress();
             let time_text = format!("{} / {}", utils::format_time(current), utils::format_time(total));
+            let indicator_text = if mp.is_paused { "⏸ " } else { "▶ " };
+
             let _ = sink.send(Box::new(move |s| {
+                s.call_on_name("play_indicator", |view: &mut TextView| {
+                    view.set_content(indicator_text);
+                });
                 s.call_on_name("track_info", |view: &mut TextView| {
                     view.set_content(track_text);
                 });
