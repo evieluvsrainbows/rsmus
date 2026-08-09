@@ -1,6 +1,6 @@
 use audiotags::Tag;
 use rayon::prelude::*;
-use rusqlite::{Connection, Result as SqlResult, params};
+use rusqlite::{Connection, Result, params};
 use std::{
     collections::HashSet,
     error::Error,
@@ -13,7 +13,7 @@ use std::{
 use crate::player::{Track, TrackMetadata};
 use crate::utils;
 
-pub fn initialize_database(conn: &Connection) -> SqlResult<()> {
+pub fn initialize_database(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,7 +131,7 @@ pub fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Result<()
     Ok(())
 }
 
-pub fn fetch_sorted_tracks_from_db(conn: &Connection) -> SqlResult<Vec<Track>> {
+pub fn fetch_sorted_tracks_from_db(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
         "SELECT title, artist, album, album_artist, year, track_number, duration, path FROM tracks
          ORDER BY COALESCE(NULLIF(album_artist, ''), artist) ASC, album ASC, track_number ASC, title ASC",

@@ -11,7 +11,7 @@ use std::{
 };
 
 use rayon::prelude::*;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player as RodioPlayer, Source, source::Buffered};
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source, source::Buffered};
 
 type PreloadedSource = Buffered<Decoder<BufReader<File>>>;
 
@@ -73,7 +73,7 @@ pub struct Track {
 
 pub struct MusicPlayer {
     _handle: MixerDeviceSink,
-    pub player: RodioPlayer,
+    pub player: Player,
     pub queue: Vec<Track>,
     pub current_index: usize,
     pub track_start_time: Instant,
@@ -103,7 +103,7 @@ impl MusicPlayer {
         }
 
         let handle = DeviceSinkBuilder::open_default_sink()?;
-        let player = RodioPlayer::connect_new(&handle.mixer());
+        let player = Player::connect_new(&handle.mixer());
 
         let mut instance = Self {
             _handle: handle,
