@@ -119,35 +119,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     let hierarchy_for_submit = hierarchy.clone();
     let player_for_submit = Arc::clone(&music_player);
 
-    select_view.set_on_submit(move |s, item_key| match item_key {
-        TreeItemKey::Artist(_) => {}
-        TreeItemKey::Album(artist_name, album_name) => {
-            if let Some(albums) = hierarchy_for_submit.get(artist_name) {
-                if let Some(tracks) = albums.get(album_name) {
-                    if let Some((global_idx, _)) = tracks.first() {
-                        if let Ok(mut mp) = player_for_submit.lock() {
-                            let _ = mp.jump_to(*global_idx);
-                        }
+    select_view.set_on_submit(move |s, item_key| {
+        let jump_to_track = |idx: usize| {
+            if let Ok(mut mp) = player_for_submit.lock() {
+                let _ = mp.jump_to(idx);
+            }
+        };
 
-                        if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
-                            let sv = scroll_view.get_inner_mut();
-                            let target_key = TreeItemKey::Track(*global_idx);
-                            for i in 0..sv.len() {
-                                if let Some((_, key)) = sv.get_item(i) {
-                                    if *key == target_key {
-                                        sv.set_selection(i);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
+        match item_key {
+            TreeItemKey::Artist(_) => {}
+            TreeItemKey::Album(artist_name, album_name) => {
+                let Some((global_idx, _)) = hierarchy_for_submit.get(artist_name).and_then(|albums| albums.get(album_name)).and_then(|tracks| tracks.first()) else {
+                    return;
+                };
+
+                jump_to_track(*global_idx);
+
+                let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") else {
+                    return;
+                };
+
+                let sv = scroll_view.get_inner_mut();
+                let target_key = TreeItemKey::Track(*global_idx);
+
+                if let Some(i) = (0..sv.len()).position(|i| sv.get_item(i).is_some_and(|(_, key)| *key == target_key)) {
+                    sv.set_selection(i);
                 }
             }
-        }
-        TreeItemKey::Track(idx) => {
-            if let Ok(mut mp) = player_for_submit.lock() {
-                let _ = mp.jump_to(*idx);
+            TreeItemKey::Track(idx) => {
+                jump_to_track(*idx);
             }
         }
     });
