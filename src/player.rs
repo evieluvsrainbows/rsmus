@@ -5,10 +5,15 @@ use std::{
     io::BufReader,
     path::{Path, PathBuf},
     str::FromStr,
+    sync::mpsc::{Receiver, channel},
+    thread,
     time::{Duration, Instant},
 };
 
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player as RodioPlayer};
+use rayon::prelude::*;
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player as RodioPlayer, Source, source::Buffered};
+
+type PreloadedSource = Buffered<Decoder<BufReader<File>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RepeatMode {
@@ -49,7 +54,7 @@ impl fmt::Display for RepeatMode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TrackMetadata {
     pub title: String,
     pub artist: String,
@@ -60,7 +65,7 @@ pub struct TrackMetadata {
     pub duration: Duration,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Track {
     pub metadata: TrackMetadata,
     pub path: PathBuf,
@@ -75,24 +80,32 @@ pub struct MusicPlayer {
     pub is_paused: bool,
     pub paused_elapsed: Duration,
     pub repeat_mode: RepeatMode,
+
+    // Pre-loading state
+    preload_rx: Option<Receiver<Result<(usize, PreloadedSource), String>>>,
+    preloaded_track: Option<(usize, PreloadedSource)>,
 }
 
 impl MusicPlayer {
     pub fn new(queue: Vec<Track>, allowed_base_dir: Option<&Path>, repeat_mode: RepeatMode) -> Result<Self, Box<dyn Error>> {
         if let Some(base) = allowed_base_dir {
             let canonical_base = base.canonicalize()?;
-            for track in &queue {
-                let canonical_path = track.path.canonicalize()?;
-                if !canonical_path.starts_with(&canonical_base) {
-                    return Err(format!("Security error: Path traversal detected: {:?}", track.path).into());
-                }
-            }
+            queue
+                .par_iter()
+                .try_for_each(|track| -> Result<(), Box<dyn Error + Send + Sync>> {
+                    let canonical_path = track.path.canonicalize()?;
+                    if !canonical_path.starts_with(&canonical_base) {
+                        return Err(format!("Security error: Path traversal detected: {:?}", track.path).into());
+                    }
+                    Ok(())
+                })
+                .map_err(|e| -> Box<dyn Error> { e })?;
         }
 
         let handle = DeviceSinkBuilder::open_default_sink()?;
         let player = RodioPlayer::connect_new(&handle.mixer());
 
-        Ok(Self {
+        let mut instance = Self {
             _handle: handle,
             player,
             queue,
@@ -101,14 +114,64 @@ impl MusicPlayer {
             is_paused: false,
             paused_elapsed: Duration::ZERO,
             repeat_mode,
-        })
+            preload_rx: None,
+            preloaded_track: None,
+        };
+
+        if !instance.queue.is_empty() {
+            instance.preload_track(0);
+        }
+
+        Ok(instance)
+    }
+
+    pub fn preload_track(&mut self, index: usize) {
+        let Some(track) = self.queue.get(index).cloned() else {
+            return;
+        };
+
+        let (tx, rx) = channel();
+        self.preload_rx = Some(rx);
+
+        thread::spawn(move || {
+            let result = File::open(&track.path)
+                .map_err(|e| e.to_string())
+                .and_then(|file| Decoder::try_from(BufReader::new(file)).map_err(|e| e.to_string()))
+                .map(|decoder| (index, decoder.buffered()));
+
+            let _ = tx.send(result);
+        });
+    }
+
+    pub fn poll_preloaded(&mut self) {
+        if let Some(ref rx) = self.preload_rx {
+            if let Ok(result) = rx.try_recv() {
+                if let Ok(data) = result {
+                    self.preloaded_track = Some(data);
+                }
+                self.preload_rx = None;
+            }
+        }
     }
 
     pub fn play_index(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
+        if index >= self.queue.len() {
+            return Err("Index out of bounds".into());
+        }
+
         self.current_index = index;
         self.player.stop();
+        self.poll_preloaded();
 
-        if let Some(track) = self.queue.get(self.current_index) {
+        if let Some((preloaded_index, source)) = self.preloaded_track.take() {
+            if preloaded_index == index {
+                self.player.append(source);
+            } else if let Some(track) = self.queue.get(index) {
+                let file = File::open(&track.path)?;
+                let source = Decoder::try_from(BufReader::new(file))?;
+                self.player.append(source);
+            }
+        } else if let Some(track) = self.queue.get(index) {
             let file = File::open(&track.path)?;
             let source = Decoder::try_from(BufReader::new(file))?;
             self.player.append(source);
@@ -119,10 +182,28 @@ impl MusicPlayer {
         self.is_paused = false;
         self.player.play();
 
+        let next_index = self.next_index();
+        self.preload_track(next_index);
+
         Ok(())
     }
 
-    /// Finds the `(start_index, end_index)` boundary for the album containing `index`.
+    pub fn next_index(&self) -> usize {
+        if self.queue.is_empty() {
+            return 0;
+        }
+
+        match self.repeat_mode {
+            RepeatMode::One => self.current_index,
+            RepeatMode::Album => {
+                let (start, end) = self.album_bounds(self.current_index);
+                if self.current_index >= end { start } else { self.current_index + 1 }
+            }
+            RepeatMode::Library => (self.current_index + 1) % self.queue.len(),
+            RepeatMode::Off => (self.current_index + 1).min(self.queue.len() - 1),
+        }
+    }
+
     pub fn album_bounds(&self, index: usize) -> (usize, usize) {
         if self.queue.is_empty() || index >= self.queue.len() {
             return (0, 0);
@@ -164,27 +245,8 @@ impl MusicPlayer {
         if self.queue.is_empty() {
             return;
         }
-
-        match self.repeat_mode {
-            RepeatMode::One => {
-                let _ = self.play_index(self.current_index);
-            }
-            RepeatMode::Album => {
-                let (start, end) = self.album_bounds(self.current_index);
-                let next_index = if self.current_index >= end { start } else { self.current_index + 1 };
-                let _ = self.play_index(next_index);
-            }
-            RepeatMode::Library => {
-                let next_index = (self.current_index + 1) % self.queue.len();
-                let _ = self.play_index(next_index);
-            }
-            RepeatMode::Off => {
-                let max_index = self.queue.len().saturating_sub(1);
-                if self.current_index < max_index {
-                    let _ = self.play_index(self.current_index + 1);
-                }
-            }
-        }
+        let next = self.next_index();
+        let _ = self.play_index(next);
     }
 
     pub fn previous(&mut self) -> Result<(), Box<dyn Error>> {
@@ -221,10 +283,7 @@ impl MusicPlayer {
         };
     }
 
-    pub fn jump_to(&mut self, index: usize) -> Result<(), Box<dyn std::error::Error>> {
-        if index >= self.queue.len() {
-            return Err("Track index out of bounds".into());
-        }
+    pub fn jump_to(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
         self.play_index(index)
     }
 

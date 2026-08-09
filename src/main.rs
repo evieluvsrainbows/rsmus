@@ -117,7 +117,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Ensure tracks within each album are sorted by track_number
     for albums in hierarchy.values_mut() {
         for tracks in albums.values_mut() {
             tracks.sort_by_key(|(_, track)| track.metadata.track_number);
