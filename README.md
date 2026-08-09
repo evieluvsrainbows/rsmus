@@ -9,7 +9,10 @@ A music player written in Rust for the modern CLI era.
 * Basic playback support - Play/pause, skip/rewind, and toggling of repeat state.
 * Metdata dialog - shows the track metadata of the currently playing track.
 
-## Keyboard Shortcuts
+## Keyboard shortcuts
+
+The following is a table containing the list of current keyboard shortcuts. Note that these keyboard shortcuts
+are currently hardcoded and cannot be rebound.
 
 | Function                | Shortcut         |
 | -------------           | -------------    |
