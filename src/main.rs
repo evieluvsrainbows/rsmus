@@ -1,38 +1,50 @@
+mod db;
 mod player;
+mod ui;
 mod utils;
 
-use audiotags::Tag;
 use clap::Parser;
 use cursive::{
     event::{self, Event, Key},
     menu,
     theme::Theme,
-    view::Resizable,
-    views::{Dialog, NamedView, TextView},
+    view::{Resizable, Scrollable},
+    views::{Dialog, LinearLayout, NamedView, Panel, ScrollView, SelectView, TextView},
 };
-use rayon::prelude::*;
-use rodio::{Decoder, Source};
+use rodio::Decoder;
+use rusqlite::Connection;
 use std::{
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fs::File,
-    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
 
-use player::{MusicPlayer, Track, TrackMetadata};
+use crate::ui::TreeItemKey;
 
 #[derive(Parser, Debug)]
 #[clap(about, version)]
 struct Args {
-    /// Album or individual song to play. Required.
-    #[arg(required = true, index = 1)]
-    input: String,
+    #[arg(short, long, value_name = "FOLDER")]
+    scan: Option<String>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
+    let conn = Connection::open("rsmus.db")?;
+    db::initialize_database(&conn)?;
+
+    if let Some(folder_path) = args.scan {
+        db::scan_directory_to_db(&conn, &folder_path)?;
+        return Ok(());
+    }
+
+    let playlist = db::fetch_sorted_tracks_from_db(&conn)?;
+    if playlist.is_empty() {
+        return Err("No tracks found in the database. Run 'rsmus --scan <folder>' first to import music.".into());
+    }
 
     let mut siv = cursive::default();
     siv.menubar()
@@ -41,81 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     siv.set_autohide_menu(false);
     siv.set_theme(Theme::terminal_default());
 
-    let input = args.input;
-    let input_path = PathBuf::from(&input);
-
-    let supported_extension = |path: &Path| -> bool {
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| {
-                let lower = ext.to_lowercase();
-                lower == "flac" || lower == "mp3" || lower == "m4a" || lower == "wav" || lower == "ogg"
-            })
-            .unwrap_or(false)
-    };
-
-    let extract_metadata = |filepath: &PathBuf| -> TrackMetadata {
-        let fallback_name = filepath.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown File").to_string();
-        let mut duration = Duration::from_secs(0);
-        if let Ok(file) = File::open(filepath) {
-            if let Ok(source) = Decoder::try_from(file) {
-                duration = source.total_duration().unwrap_or(Duration::from_secs(0));
-            }
-        }
-
-        let tag_parser = Tag::default();
-        if let Ok(tag) = tag_parser.read_from_path(filepath) {
-            let raw_title = tag.title().unwrap_or(&fallback_name);
-            TrackMetadata {
-                title: utils::clean_title(raw_title),
-                artist: tag.artist().unwrap_or("Unknown Artist").to_string(),
-                album: tag.album_title().unwrap_or("Unknown Album").to_string(),
-                year: tag.year().map(|y| y.to_string()).unwrap_or_else(|| "Unknown Year".to_string()),
-                duration,
-            }
-        } else {
-            TrackMetadata {
-                title: utils::clean_title(&fallback_name),
-                artist: "Unknown Artist".to_string(),
-                album: "Unknown Album".to_string(),
-                year: "Unknown Year".to_string(),
-                duration,
-            }
-        }
-    };
-
-    let mut paths_to_append = Vec::new();
-
-    if std::fs::metadata(&input_path)?.is_dir() {
-        let entries: Vec<PathBuf> = std::fs::read_dir(&input_path)?
-            .filter_map(Result::ok)
-            .map(|f| f.path())
-            .filter(|path| path.is_file() && supported_extension(path))
-            .collect();
-
-        if entries.is_empty() {
-            return Err(format!("No supported music files found in directory: {}", input).into());
-        }
-
-        let mut sorted_entries = entries;
-        sorted_entries.sort();
-        paths_to_append = sorted_entries;
-    } else {
-        if !supported_extension(&input_path) {
-            return Err(format!("Specified file is not a supported music file: {}", input).into());
-        }
-        paths_to_append.push(input_path);
-    }
-
-    let playlist: Vec<Track> = paths_to_append
-        .par_iter()
-        .map(|filepath| {
-            let metadata = extract_metadata(filepath);
-            Track { metadata, path: filepath.clone() }
-        })
-        .collect();
-
-    let music_player = Arc::new(Mutex::new(MusicPlayer::new(playlist, None)?));
+    let music_player = Arc::new(Mutex::new(player::MusicPlayer::new(playlist, None)?));
     {
         let mut mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
         for track in &mp.queue {
@@ -145,18 +83,121 @@ fn main() -> Result<(), Box<dyn Error>> {
     let track_label = NamedView::new("track_info", TextView::new(format!("{}", initial_info)));
     let time_label = NamedView::new("time_label", TextView::new(initial_time_text));
 
-    let status_bar = cursive::views::LinearLayout::horizontal()
+    let status_bar = LinearLayout::horizontal()
         .child(indicator_label)
         .child(track_label)
         .child(cursive::views::DummyView.full_width())
         .child(time_label);
 
-    let root_layout = cursive::views::LinearLayout::vertical()
-        .child(cursive::views::DummyView.full_height())
-        .child(status_bar)
-        .full_screen();
+    let mut hierarchy: BTreeMap<String, BTreeMap<String, Vec<(usize, player::Track)>>> = BTreeMap::new();
+    {
+        let mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
+        for (i, track) in mp.queue.iter().enumerate() {
+            let album_artist = if track.metadata.album_artist.is_empty() {
+                track.metadata.artist.clone()
+            } else {
+                track.metadata.album_artist.clone()
+            };
+            let album = track.metadata.album.clone();
+            hierarchy.entry(album_artist).or_default().entry(album).or_default().push((i, track.clone()));
+        }
+    }
+
+    let mut initial_artists = BTreeSet::new();
+    let mut initial_albums = BTreeSet::new();
+    for (artist, albums) in &hierarchy {
+        initial_artists.insert(artist.clone());
+        for album in albums.keys() {
+            initial_albums.insert((artist.clone(), album.clone()));
+        }
+    }
+
+    let expanded_artists = Arc::new(Mutex::new(initial_artists));
+    let expanded_albums = Arc::new(Mutex::new(initial_albums));
+
+    let mut select_view = SelectView::<ui::TreeItemKey>::new();
+    let hierarchy_for_submit = hierarchy.clone();
+    let player_for_submit = Arc::clone(&music_player);
+
+    select_view.set_on_submit(move |s, item_key| match item_key {
+        TreeItemKey::Artist(_) => {}
+        TreeItemKey::Album(artist_name, album_name) => {
+            if let Some(albums) = hierarchy_for_submit.get(artist_name) {
+                if let Some(tracks) = albums.get(album_name) {
+                    if let Some((global_idx, _)) = tracks.first() {
+                        if let Ok(mut mp) = player_for_submit.lock() {
+                            let _ = mp.jump_to(*global_idx);
+                        }
+
+                        if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
+                            let sv = scroll_view.get_inner_mut();
+                            let target_key = TreeItemKey::Track(*global_idx);
+                            for i in 0..sv.len() {
+                                if let Some((_, key)) = sv.get_item(i) {
+                                    if *key == target_key {
+                                        sv.set_selection(i);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        TreeItemKey::Track(idx) => {
+            if let Ok(mut mp) = player_for_submit.lock() {
+                let _ = mp.jump_to(*idx);
+            }
+        }
+    });
+
+    ui::rebuild_library_view(&mut select_view, &hierarchy, &expanded_artists.lock().unwrap(), &expanded_albums.lock().unwrap());
+
+    let library_panel = Panel::new(NamedView::new("library_view", select_view.scrollable())).title("Music Library");
+    let root_layout = LinearLayout::vertical().child(library_panel.full_height()).child(status_bar).full_screen();
 
     siv.add_layer(root_layout);
+
+    let artists_for_space = Arc::clone(&expanded_artists);
+    let albums_for_space = Arc::clone(&expanded_albums);
+    let hierarchy_for_space = hierarchy.clone();
+
+    siv.add_global_callback(' ', move |s| {
+        if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
+            let sv = scroll_view.get_inner_mut();
+            if let Some(item_key) = sv.selection().map(|v| (*v).clone()) {
+                match item_key {
+                    TreeItemKey::Artist(artist_name) => {
+                        let mut artists = artists_for_space.lock().unwrap();
+                        if artists.contains(&artist_name) {
+                            artists.remove(&artist_name);
+                        } else {
+                            artists.insert(artist_name.clone());
+                        }
+                        let artists_snapshot = artists.clone();
+                        let albums_snapshot = albums_for_space.lock().unwrap().clone();
+                        drop(artists);
+                        ui::rebuild_library_view(sv, &hierarchy_for_space, &artists_snapshot, &albums_snapshot);
+                    }
+                    TreeItemKey::Album(artist_name, album_name) => {
+                        let album_key = (artist_name, album_name);
+                        let mut albums = albums_for_space.lock().unwrap();
+                        if albums.contains(&album_key) {
+                            albums.remove(&album_key);
+                        } else {
+                            albums.insert(album_key);
+                        }
+                        let artists_snapshot = artists_for_space.lock().unwrap().clone();
+                        let albums_snapshot = albums.clone();
+                        drop(albums);
+                        ui::rebuild_library_view(sv, &hierarchy_for_space, &artists_snapshot, &albums_snapshot);
+                    }
+                    TreeItemKey::Track(_) => {}
+                }
+            }
+        }
+    });
 
     let player_for_thread = Arc::clone(&music_player);
     let sink = siv.cb_sink().clone();
@@ -210,6 +251,30 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
+    let player_for_meta = Arc::clone(&music_player);
+    siv.add_global_callback('m', move |s| {
+        if let Ok(mp) = player_for_meta.lock() {
+            if let Some(track) = mp.queue.get(mp.current_index) {
+                let m = &track.metadata;
+                let meta_text = format!(
+                    "Title: {}\nArtist: {}\nAlbum Artist: {}\nAlbum: {}\nYear: {}\nTrack Number: {}\nDuration: {}\nPath: {}",
+                    m.title,
+                    m.artist,
+                    m.album_artist,
+                    m.album,
+                    m.year,
+                    m.track_number,
+                    utils::format_time(m.duration.as_secs() as usize),
+                    track.path.display()
+                );
+
+                s.add_layer(Dialog::around(TextView::new(meta_text)).title(format!("Track Metadata for {}", m.title)).button("Close", |s| {
+                    s.pop_layer();
+                }));
+            }
+        }
+    });
+
     let player_for_c = Arc::clone(&music_player);
     siv.add_global_callback('c', move |_| {
         if let Ok(mut mp) = player_for_c.lock() {
@@ -227,7 +292,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let player_for_next = Arc::clone(&music_player);
     siv.add_global_callback(Event::Key(Key::Right), move |_| {
         if let Ok(mut mp) = player_for_next.lock() {
-            mp.skip();
+            let _ = mp.skip();
         }
     });
 

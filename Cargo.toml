@@ -11,3 +11,4 @@ claxon              = "0.4.3"
 cursive             = { version = "0.21.0", default-features = false, features = ["crossterm-backend"] }
 rayon               = "1.12.0"
 rodio               = "0.22.2"
+rusqlite            = { version = "0.40.1", features = ["bundled"] }

@@ -13,7 +13,9 @@ pub struct TrackMetadata {
     pub title: String,
     pub artist: String,
     pub album: String,
+    pub album_artist: String,
     pub year: String,
+    pub track_number: u16,
     pub duration: Duration,
 }
 
@@ -59,15 +61,8 @@ impl MusicPlayer {
         })
     }
 
-    pub fn skip(&mut self) {
-        if !self.player.empty() {
-            self.player.skip_one();
-            self.advance_track();
-        }
-    }
-
-    pub fn previous(&mut self) -> Result<(), Box<dyn Error>> {
-        self.current_index = self.current_index.saturating_sub(1);
+    pub fn play_index(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
+        self.current_index = index;
         self.player.stop();
 
         if let Some(track) = self.queue.get(self.current_index) {
@@ -82,6 +77,25 @@ impl MusicPlayer {
         self.player.play();
 
         Ok(())
+    }
+
+    pub fn skip(&mut self) {
+        let max_index = self.queue.len().saturating_sub(1);
+        if self.current_index < max_index {
+            let _ = self.play_index(self.current_index + 1);
+        }
+    }
+
+    pub fn previous(&mut self) -> Result<(), Box<dyn Error>> {
+        let new_index = self.current_index.saturating_sub(1);
+        self.play_index(new_index)
+    }
+
+    pub fn advance_track(&mut self) {
+        let max_index = self.queue.len().saturating_sub(1);
+        if self.current_index < max_index {
+            let _ = self.play_index(self.current_index + 1);
+        }
     }
 
     pub fn play_pause(&mut self) {
@@ -100,12 +114,25 @@ impl MusicPlayer {
         }
     }
 
-    pub fn advance_track(&mut self) {
-        let max_index = self.queue.len().saturating_sub(1);
-        self.current_index = (self.current_index + 1).min(max_index);
+    pub fn jump_to(&mut self, index: usize) -> Result<(), Box<dyn std::error::Error>> {
+        if index >= self.queue.len() {
+            return Err("Track index out of bounds".into());
+        }
+
+        self.player.stop();
+        self.current_index = index;
+
+        for i in self.current_index..self.queue.len() {
+            let file = File::open(&self.queue[i].path)?;
+            let source = Decoder::try_from(BufReader::new(file))?;
+            self.player.append(source);
+        }
+
         self.track_start_time = Instant::now();
-        self.paused_elapsed = Duration::ZERO;
         self.is_paused = false;
+        self.player.play();
+
+        Ok(())
     }
 
     pub fn current_track_info(&self) -> String {
