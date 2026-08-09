@@ -237,7 +237,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             let index_changed = current_idx != prev_idx;
-            if index_changed || is_paused != prev_paused {
+            let paused_changed = is_paused != prev_paused;
+
+            if index_changed || paused_changed {
                 if let Some(track) = mp.queue.get(current_idx) {
                     let t = &track.metadata;
                     utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, is_paused);
@@ -256,7 +258,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 RepeatMode::Library => "[Repeat: Library]",
             };
 
-            if time_text == prev_time_text && !index_changed {
+            if time_text == prev_time_text && !index_changed && !paused_changed {
                 drop(mp);
                 continue;
             }
