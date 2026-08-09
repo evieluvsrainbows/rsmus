@@ -9,7 +9,7 @@ use cursive::{
     menu,
     theme::Theme,
     view::{Resizable, Scrollable},
-    views::{Dialog, LinearLayout, NamedView, Panel, ScrollView, SelectView, TextView},
+    views::{Dialog, DummyView, LinearLayout, NamedView, Panel, ScrollView, SelectView, TextView},
 };
 use rodio::Decoder;
 use rusqlite::Connection;
@@ -22,7 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::ui::TreeItemKey;
+use crate::{player::RepeatMode, ui::TreeItemKey};
 
 #[derive(Parser, Debug)]
 #[clap(about, version)]
@@ -33,11 +33,11 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let conn = Connection::open("rsmus.db")?;
+    let mut conn = Connection::open("rsmus.db")?;
     db::initialize_database(&conn)?;
 
     if let Some(folder_path) = args.scan {
-        db::scan_directory_to_db(&conn, &folder_path)?;
+        db::scan_directory_to_db(&mut conn, &folder_path)?;
         return Ok(());
     }
 
@@ -46,6 +46,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("No tracks found in the database. Run 'rsmus --scan <folder>' first to import music.".into());
     }
 
+    let repeat_mode = match conn.query_row("SELECT value FROM settings WHERE key = 'repeat_mode'", [], |row| row.get::<_, String>(0)) {
+        Ok(val) => match val.as_str() {
+            "One" => RepeatMode::One,
+            "Album" => RepeatMode::Album,
+            "Library" => RepeatMode::Library,
+            _ => RepeatMode::Off,
+        },
+        Err(_) => RepeatMode::Off,
+    };
+
     let mut siv = cursive::default();
     siv.menubar()
         .add_subtree("File", menu::Tree::new().leaf("Quit", |s| s.quit()))
@@ -53,7 +63,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     siv.set_autohide_menu(false);
     siv.set_theme(Theme::terminal_default());
 
-    let music_player = Arc::new(Mutex::new(player::MusicPlayer::new(playlist, None)?));
+    let music_player = Arc::new(Mutex::new(player::MusicPlayer::new(playlist, None, repeat_mode)?));
     {
         let mut mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
         for track in &mp.queue {
@@ -80,13 +90,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let initial_time_text = format!("0:00 / {}", utils::format_time(initial_duration));
     let indicator_label = NamedView::new("play_indicator", TextView::new("▶ "));
-    let track_label = NamedView::new("track_info", TextView::new(format!("{}", initial_info)));
+    let track_label = NamedView::new("track_info", TextView::new(format!("{}", initial_info)).no_wrap()).max_height(1);
     let time_label = NamedView::new("time_label", TextView::new(initial_time_text));
+    let repeat_label = NamedView::new("repeat_label", TextView::new("[Repeat: Off]"));
 
     let status_bar = LinearLayout::horizontal()
         .child(indicator_label)
-        .child(track_label)
-        .child(cursive::views::DummyView.full_width())
+        // Limit height to 1 line and allow it to take available remaining width
+        .child(track_label.max_height(1).full_width())
+        .child(DummyView)
+        .child(repeat_label)
+        .child(TextView::new("  "))
         .child(time_label);
 
     let mut hierarchy: BTreeMap<String, BTreeMap<String, Vec<(usize, player::Track)>>> = BTreeMap::new();
@@ -100,6 +114,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             let album = track.metadata.album.clone();
             hierarchy.entry(album_artist).or_default().entry(album).or_default().push((i, track.clone()));
+        }
+    }
+
+    // Ensure tracks within each album are sorted by track_number
+    for albums in hierarchy.values_mut() {
+        for tracks in albums.values_mut() {
+            tracks.sort_by_key(|(_, track)| track.metadata.track_number);
         }
     }
 
@@ -120,34 +141,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     let player_for_submit = Arc::clone(&music_player);
 
     select_view.set_on_submit(move |s, item_key| {
-        let jump_to_track = |idx: usize| {
-            if let Ok(mut mp) = player_for_submit.lock() {
-                let _ = mp.jump_to(idx);
+        let target_idx = match item_key {
+            TreeItemKey::Artist(_) => return,
+            TreeItemKey::Track(idx) => *idx,
+            TreeItemKey::Album(artist, album) => {
+                let Some((idx, _)) = hierarchy_for_submit.get(artist).and_then(|a| a.get(album)).and_then(|t| t.first()) else {
+                    return;
+                };
+                *idx
             }
         };
 
-        match item_key {
-            TreeItemKey::Artist(_) => {}
-            TreeItemKey::Album(artist_name, album_name) => {
-                let Some((global_idx, _)) = hierarchy_for_submit.get(artist_name).and_then(|albums| albums.get(album_name)).and_then(|tracks| tracks.first()) else {
-                    return;
-                };
+        if let Ok(mut mp) = player_for_submit.lock() {
+            let _ = mp.jump_to(target_idx);
+        }
 
-                jump_to_track(*global_idx);
-
-                let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") else {
-                    return;
-                };
-
+        if matches!(item_key, TreeItemKey::Album(..)) {
+            if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
                 let sv = scroll_view.get_inner_mut();
-                let target_key = TreeItemKey::Track(*global_idx);
+                let target_key = TreeItemKey::Track(target_idx);
 
-                if let Some(i) = (0..sv.len()).position(|i| sv.get_item(i).is_some_and(|(_, key)| *key == target_key)) {
-                    sv.set_selection(i);
+                if let Some(pos) = (0..sv.len()).position(|i| sv.get_item(i).map_or(false, |(_, k)| *k == target_key)) {
+                    sv.set_selection(pos);
                 }
-            }
-            TreeItemKey::Track(idx) => {
-                jump_to_track(*idx);
             }
         }
     });
@@ -201,52 +217,69 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let player_for_thread = Arc::clone(&music_player);
     let sink = siv.cb_sink().clone();
+
     thread::spawn(move || {
-        let mut previous_index = usize::MAX;
-        let mut previous_paused = false;
+        let mut prev_idx = usize::MAX;
+        let mut prev_paused = false;
+        let mut prev_time_text = String::new();
 
         loop {
             thread::sleep(Duration::from_millis(150));
 
-            let mut mp = match player_for_thread.lock() {
-                Ok(guard) => guard,
-                Err(_) => break,
-            };
+            let Ok(mut mp) = player_for_thread.lock() else { break };
 
             let current_idx = mp.current_index;
-            let current_paused = mp.is_paused;
+            let is_paused = mp.is_paused;
             let (current_sec, total_sec) = mp.get_current_progress();
 
-            if current_sec >= total_sec && total_sec > 0 && current_idx + 1 < mp.queue.len() {
+            if current_sec >= total_sec && total_sec > 0 {
                 mp.advance_track();
             }
 
-            if current_idx != previous_index || current_paused != previous_paused {
+            let index_changed = current_idx != prev_idx;
+            if index_changed || is_paused != prev_paused {
                 if let Some(track) = mp.queue.get(current_idx) {
                     let t = &track.metadata;
-                    utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, current_paused);
+                    utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, is_paused);
                 }
-                previous_index = current_idx;
-                previous_paused = current_paused;
+                prev_idx = current_idx;
+                prev_paused = is_paused;
             }
 
-            let track_text = format!("{}", mp.current_track_info());
-            let (current, total) = mp.get_current_progress();
-            let time_text = format!("{} / {}", utils::format_time(current), utils::format_time(total));
-            let indicator_text = if current_paused { "⏸ " } else { "▶ " };
+            let track_text = mp.current_track_info().to_string();
+            let time_text = format!("{} / {}", utils::format_time(current_sec), utils::format_time(total_sec));
+            let indicator_text = if is_paused { "⏸ " } else { "▶ " };
+            let repeat_text = match mp.repeat_mode {
+                RepeatMode::Off => "[Repeat: Off]",
+                RepeatMode::One => "[Repeat: One]",
+                RepeatMode::Album => "[Repeat: Album]",
+                RepeatMode::Library => "[Repeat: Library]",
+            };
+
+            if time_text == prev_time_text && !index_changed {
+                drop(mp);
+                continue;
+            }
+            prev_time_text = time_text.clone();
 
             drop(mp);
 
             let _ = sink.send(Box::new(move |s| {
-                s.call_on_name("play_indicator", |view: &mut TextView| {
-                    view.set_content(indicator_text);
-                });
-                s.call_on_name("track_info", |view: &mut TextView| {
-                    view.set_content(track_text);
-                });
-                s.call_on_name("time_label", |view: &mut TextView| {
-                    view.set_content(time_text);
-                });
+                s.call_on_name("play_indicator", |v: &mut TextView| v.set_content(indicator_text));
+                s.call_on_name("track_info", |v: &mut TextView| v.set_content(track_text));
+                s.call_on_name("time_label", |v: &mut TextView| v.set_content(time_text));
+                s.call_on_name("repeat_label", |v: &mut TextView| v.set_content(repeat_text));
+
+                if index_changed {
+                    if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
+                        let sv = scroll_view.get_inner_mut();
+                        let target_key = TreeItemKey::Track(current_idx);
+
+                        if let Some(pos) = (0..sv.len()).position(|i| sv.get_item(i).is_some_and(|(_, k)| *k == target_key)) {
+                            sv.set_selection(pos);
+                        }
+                    }
+                }
             }));
         }
     });
@@ -279,6 +312,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     siv.add_global_callback('c', move |_| {
         if let Ok(mut mp) = player_for_c.lock() {
             mp.play_pause();
+        }
+    });
+
+    let player_for_repeat = Arc::clone(&music_player);
+
+    siv.add_global_callback('r', move |_| {
+        if let Ok(mut mp) = player_for_repeat.lock() {
+            mp.toggle_repeat_mode();
+            let mode_str = match mp.repeat_mode {
+                RepeatMode::Off => "Off",
+                RepeatMode::One => "One",
+                RepeatMode::Album => "Album",
+                RepeatMode::Library => "Library",
+            };
+            if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
+                let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('repeat_mode', ?1)", [&mode_str]);
+            }
         }
     });
 
