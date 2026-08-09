@@ -224,7 +224,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut prev_time_text = String::new();
 
         loop {
-            thread::sleep(Duration::from_millis(150));
+            thread::sleep(Duration::from_millis(250));
 
             let Ok(mut mp) = player_for_thread.lock() else { break };
 
@@ -251,12 +251,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             let track_text = mp.current_track_info().to_string();
             let time_text = format!("{} / {}", utils::format_time(current_sec), utils::format_time(total_sec));
             let indicator_text = if is_paused { "⏸ " } else { "▶ " };
-            let repeat_text = match mp.repeat_mode {
-                RepeatMode::Off => "[Repeat: Off]",
-                RepeatMode::One => "[Repeat: One]",
-                RepeatMode::Album => "[Repeat: Album]",
-                RepeatMode::Library => "[Repeat: Library]",
-            };
 
             if time_text == prev_time_text && !index_changed && !paused_changed {
                 drop(mp);
@@ -270,7 +264,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 s.call_on_name("play_indicator", |v: &mut TextView| v.set_content(indicator_text));
                 s.call_on_name("track_info", |v: &mut TextView| v.set_content(track_text));
                 s.call_on_name("time_label", |v: &mut TextView| v.set_content(time_text));
-                s.call_on_name("repeat_label", |v: &mut TextView| v.set_content(repeat_text));
 
                 if index_changed {
                     if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
@@ -282,6 +275,37 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                 }
+            }));
+        }
+    });
+
+    let player_for_repeat_thread = Arc::clone(&music_player);
+    let repeat_sink = siv.cb_sink().clone();
+
+    thread::spawn(move || {
+        let mut prev_repeat_mode = None;
+
+        loop {
+            thread::sleep(Duration::from_millis(150));
+
+            let Ok(mp) = player_for_repeat_thread.lock() else { break };
+            let current_repeat_mode = mp.repeat_mode;
+            drop(mp);
+
+            if Some(current_repeat_mode) == prev_repeat_mode {
+                continue;
+            }
+            prev_repeat_mode = Some(current_repeat_mode);
+
+            let repeat_text = match current_repeat_mode {
+                RepeatMode::Off => "[Repeat: Off]",
+                RepeatMode::One => "[Repeat: One]",
+                RepeatMode::Album => "[Repeat: Album]",
+                RepeatMode::Library => "[Repeat: Library]",
+            };
+
+            let _ = repeat_sink.send(Box::new(move |s| {
+                s.call_on_name("repeat_label", |v: &mut TextView| v.set_content(repeat_text));
             }));
         }
     });
