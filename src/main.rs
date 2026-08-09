@@ -284,7 +284,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     thread::spawn(move || {
         let mut prev_repeat_mode = None;
-
         loop {
             thread::sleep(Duration::from_millis(150));
 
@@ -352,9 +351,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 RepeatMode::Album => "Album",
                 RepeatMode::Library => "Library",
             };
-            if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
-                let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('repeat_mode', ?1)", [&mode_str]);
-            }
+            thread::spawn(move || {
+                if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
+                    let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('repeat_mode', ?1)", [&mode_str]);
+                }
+            });
         }
     });
 
