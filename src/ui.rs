@@ -5,13 +5,13 @@ use cursive::views::SelectView;
 use crate::{player::Track, utils};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TreeItemKey {
+pub(crate) enum TreeItemKey {
     Artist(String),
     Album(String, String),
     Track(usize),
 }
 
-pub fn rebuild_library_view(
+pub(crate) fn rebuild_library_view(
     select_view: &mut SelectView<TreeItemKey>,
     hierarchy: &BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>,
     expanded_artists: &BTreeSet<String>,

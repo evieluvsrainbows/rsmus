@@ -13,7 +13,7 @@ use std::{
 use crate::player::{Track, TrackMetadata};
 use crate::utils;
 
-pub fn initialize_database(conn: &Connection) -> Result<()> {
+pub(crate) fn initialize_database(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +81,7 @@ fn extract_track_metadata(filepath: &Path) -> TrackMetadata {
     }
 }
 
-pub fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Result<(), Box<dyn Error>> {
+pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Result<(), Box<dyn Error>> {
     let input_path = PathBuf::from(input_dir);
     if !input_path.is_dir() {
         return Err(format!("Specified path is not a valid directory: {}", input_dir).into());
@@ -131,7 +131,7 @@ pub fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Result<()
     Ok(())
 }
 
-pub fn fetch_sorted_tracks_from_db(conn: &Connection) -> Result<Vec<Track>> {
+pub(crate) fn fetch_sorted_tracks_from_db(conn: &Connection) -> Result<Vec<Track>> {
     let mut stmt = conn.prepare(
         "SELECT title, artist, album, album_artist, year, track_number, duration, path FROM tracks
          ORDER BY COALESCE(NULLIF(album_artist, ''), artist) ASC, album ASC, track_number ASC, title ASC",

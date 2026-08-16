@@ -16,7 +16,7 @@ use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source, source:
 type PreloadedSource = Buffered<Decoder<BufReader<File>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum RepeatMode {
+pub(crate) enum RepeatMode {
     Off,
     One,
     Album,
@@ -87,7 +87,7 @@ pub struct MusicPlayer {
 }
 
 impl MusicPlayer {
-    pub fn new(queue: Vec<Track>, allowed_base_dir: Option<&Path>, repeat_mode: RepeatMode) -> Result<Self, Box<dyn Error>> {
+    pub(crate) fn new(queue: Vec<Track>, allowed_base_dir: Option<&Path>, repeat_mode: RepeatMode) -> Result<Self, Box<dyn Error>> {
         if let Some(base) = allowed_base_dir {
             let canonical_base = base.canonicalize()?;
             queue
@@ -125,7 +125,7 @@ impl MusicPlayer {
         Ok(instance)
     }
 
-    pub fn preload_track(&mut self, index: usize) {
+    pub(crate) fn preload_track(&mut self, index: usize) {
         let Some(track) = self.queue.get(index).cloned() else {
             return;
         };
@@ -143,7 +143,7 @@ impl MusicPlayer {
         });
     }
 
-    pub fn poll_preloaded(&mut self) {
+    pub(crate) fn poll_preloaded(&mut self) {
         if let Some(ref rx) = self.preload_rx {
             if let Ok(result) = rx.try_recv() {
                 if let Ok(data) = result {
@@ -154,7 +154,7 @@ impl MusicPlayer {
         }
     }
 
-    pub fn play_index(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn play_index(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
         if index >= self.queue.len() {
             return Err("Index out of bounds".into());
         }
@@ -188,7 +188,7 @@ impl MusicPlayer {
         Ok(())
     }
 
-    pub fn next_index(&self) -> usize {
+    pub(crate) fn next_index(&self) -> usize {
         if self.queue.is_empty() {
             return 0;
         }
@@ -204,7 +204,7 @@ impl MusicPlayer {
         }
     }
 
-    pub fn album_bounds(&self, index: usize) -> (usize, usize) {
+    pub(crate) fn album_bounds(&self, index: usize) -> (usize, usize) {
         if self.queue.is_empty() || index >= self.queue.len() {
             return (0, 0);
         }
@@ -241,7 +241,7 @@ impl MusicPlayer {
         (start, end)
     }
 
-    pub fn skip(&mut self) {
+    pub(crate) fn skip(&mut self) {
         if self.queue.is_empty() {
             return;
         }
@@ -249,16 +249,16 @@ impl MusicPlayer {
         let _ = self.play_index(next);
     }
 
-    pub fn previous(&mut self) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn previous(&mut self) -> Result<(), Box<dyn Error>> {
         let new_index = self.current_index.saturating_sub(1);
         self.play_index(new_index)
     }
 
-    pub fn advance_track(&mut self) {
+    pub(crate) fn advance_track(&mut self) {
         self.skip();
     }
 
-    pub fn play_pause(&mut self) {
+    pub(crate) fn play_pause(&mut self) {
         if self.player.is_paused() {
             self.player.play();
             if self.is_paused {
@@ -274,7 +274,7 @@ impl MusicPlayer {
         }
     }
 
-    pub fn toggle_repeat_mode(&mut self) {
+    pub(crate) fn toggle_repeat_mode(&mut self) {
         self.repeat_mode = match self.repeat_mode {
             RepeatMode::Off => RepeatMode::One,
             RepeatMode::One => RepeatMode::Album,
@@ -283,11 +283,11 @@ impl MusicPlayer {
         };
     }
 
-    pub fn jump_to(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn jump_to(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
         self.play_index(index)
     }
 
-    pub fn current_track_info(&self) -> String {
+    pub(crate) fn current_track_info(&self) -> String {
         if let Some(track) = self.queue.get(self.current_index) {
             let t = &track.metadata;
             format!("{} by {} on {} ({})", t.title, t.artist, t.album, t.year)
@@ -298,7 +298,7 @@ impl MusicPlayer {
         }
     }
 
-    pub fn get_current_progress(&self) -> (usize, usize) {
+    pub(crate) fn get_current_progress(&self) -> (usize, usize) {
         let Some(track) = self.queue.get(self.current_index) else {
             return (0, 100);
         };

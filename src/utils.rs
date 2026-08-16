@@ -1,6 +1,6 @@
 use std::io::Write;
 
-pub fn format_time(secs: usize) -> String {
+pub(crate) fn format_time(secs: usize) -> String {
     let minutes = secs / 60;
     let seconds = secs % 60;
     format!("{}:{:02}", minutes, seconds)
@@ -12,7 +12,7 @@ pub fn format_time(secs: usize) -> String {
 /// allows for cleaner song titles without the user having to go in
 /// and manually update their music metadata to remove the "Explicit"
 /// or "Clean" labeling.
-pub fn clean_title(title: &str) -> String {
+pub(crate) fn clean_title(title: &str) -> String {
     let patterns = ["(explicit)", "[explicit]", "(Explicit)", "[Explicit]", "Explicit", "- Explicit", "(Clean)", "[Clean]"];
 
     let mut cleaned = title.to_string();
@@ -29,7 +29,7 @@ fn sanitize_terminal_string(input: &str) -> String {
 }
 
 /// Updates the terminal title to reflect current playback status safely.
-pub fn update_terminal_title(title: &str, artist: &str, album: &str, year: &str, is_paused: bool) {
+pub(crate) fn update_terminal_title(title: &str, artist: &str, album: &str, year: &str, is_paused: bool) {
     let indicator = if is_paused { "⏸" } else { "▶" };
 
     let safe_title = sanitize_terminal_string(title);

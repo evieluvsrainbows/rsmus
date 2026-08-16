@@ -96,7 +96,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let status_bar = LinearLayout::horizontal()
         .child(indicator_label)
-        // Limit height to 1 line and allow it to take available remaining width
         .child(track_label.max_height(1).full_width())
         .child(DummyView)
         .child(repeat_label)

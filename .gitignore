@@ -2,6 +2,11 @@
 # will have compiled files and executables
 /target/
 
+# Ignore Cargo.lock so that way the latest versions
+# of dependencies are grabbed according to the versions
+# in Cargo.toml.
+Cargo.lock
+
 # Ignore macOS-generated .DS_Store file.
 .DS_Store
 
