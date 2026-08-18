@@ -4,6 +4,13 @@ version             = "0.0.1-alpha"
 authors             = ["evieluvsrainbows"]
 edition             = "2024"
 
+[profile.release]
+opt-level           = 3
+lto                 = true
+codegen-units       = 1
+panic               = "abort"
+strip               = true
+
 [dependencies]
 audiotags           = "0.5.0"
 clap                = { version = "4.6.6", features = ["derive"] }

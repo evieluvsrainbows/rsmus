@@ -18,18 +18,18 @@ type PreloadedSource = Buffered<Decoder<BufReader<File>>>;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum RepeatMode {
     Off,
-    One,
+    Single,
     Album,
-    Library,
+    All,
 }
 
 impl RepeatMode {
     pub fn as_str(&self) -> &'static str {
         match self {
             RepeatMode::Off => "off",
-            RepeatMode::One => "one",
+            RepeatMode::Single => "single",
             RepeatMode::Album => "album",
-            RepeatMode::Library => "library",
+            RepeatMode::All => "all",
         }
     }
 }
@@ -40,9 +40,9 @@ impl FromStr for RepeatMode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "off" => Ok(RepeatMode::Off),
-            "one" => Ok(RepeatMode::One),
+            "single" => Ok(RepeatMode::Single),
             "album" => Ok(RepeatMode::Album),
-            "library" => Ok(RepeatMode::Library),
+            "all" => Ok(RepeatMode::All),
             _ => Err(()),
         }
     }
@@ -55,7 +55,7 @@ impl fmt::Display for RepeatMode {
 }
 
 #[derive(Clone, Debug)]
-pub struct TrackMetadata {
+pub(crate) struct TrackMetadata {
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -66,12 +66,12 @@ pub struct TrackMetadata {
 }
 
 #[derive(Clone, Debug)]
-pub struct Track {
+pub(crate) struct Track {
     pub metadata: TrackMetadata,
     pub path: PathBuf,
 }
 
-pub struct MusicPlayer {
+pub(crate) struct MusicPlayer {
     _handle: MixerDeviceSink,
     pub player: Player,
     pub queue: Vec<Track>,
@@ -194,12 +194,12 @@ impl MusicPlayer {
         }
 
         match self.repeat_mode {
-            RepeatMode::One => self.current_index,
+            RepeatMode::Single => self.current_index,
             RepeatMode::Album => {
                 let (start, end) = self.album_bounds(self.current_index);
                 if self.current_index >= end { start } else { self.current_index + 1 }
             }
-            RepeatMode::Library => (self.current_index + 1) % self.queue.len(),
+            RepeatMode::All => (self.current_index + 1) % self.queue.len(),
             RepeatMode::Off => (self.current_index + 1).min(self.queue.len() - 1),
         }
     }
@@ -276,10 +276,10 @@ impl MusicPlayer {
 
     pub(crate) fn toggle_repeat_mode(&mut self) {
         self.repeat_mode = match self.repeat_mode {
-            RepeatMode::Off => RepeatMode::One,
-            RepeatMode::One => RepeatMode::Album,
-            RepeatMode::Album => RepeatMode::Library,
-            RepeatMode::Library => RepeatMode::Off,
+            RepeatMode::Off => RepeatMode::Single,
+            RepeatMode::Single => RepeatMode::Album,
+            RepeatMode::Album => RepeatMode::All,
+            RepeatMode::All => RepeatMode::Off,
         };
     }
 

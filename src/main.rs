@@ -48,9 +48,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let repeat_mode = match conn.query_row("SELECT value FROM settings WHERE key = 'repeat_mode'", [], |row| row.get::<_, String>(0)) {
         Ok(val) => match val.as_str() {
-            "One" => RepeatMode::One,
+            "Single" => RepeatMode::Single,
             "Album" => RepeatMode::Album,
-            "Library" => RepeatMode::Library,
+            "All" => RepeatMode::All,
             _ => RepeatMode::Off,
         },
         Err(_) => RepeatMode::Off,
@@ -296,9 +296,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let repeat_text = match current_repeat_mode {
                 RepeatMode::Off => "[Repeat: Off]",
-                RepeatMode::One => "[Repeat: One]",
+                RepeatMode::Single => "[Repeat: Single]",
                 RepeatMode::Album => "[Repeat: Album]",
-                RepeatMode::Library => "[Repeat: Library]",
+                RepeatMode::All => "[Repeat: All]",
             };
 
             let _ = repeat_sink.send(Box::new(move |s| {
@@ -345,15 +345,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             mp.toggle_repeat_mode();
             let mode_str = match mp.repeat_mode {
                 RepeatMode::Off => "Off",
-                RepeatMode::One => "One",
+                RepeatMode::Single => "Single",
                 RepeatMode::Album => "Album",
-                RepeatMode::Library => "Library",
+                RepeatMode::All => "All",
             };
-            thread::spawn(move || {
-                if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
-                    let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('repeat_mode', ?1)", [&mode_str]);
-                }
-            });
+
+            if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
+                let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('repeat_mode', ?1)", [&mode_str]);
+            }
         }
     });
 
