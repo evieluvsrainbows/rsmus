@@ -153,7 +153,7 @@ impl MusicPlayer {
         }
     }
 
-    pub(crate) fn play_index(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn play_index(&mut self, index: usize, start_offset: Duration, start_paused: bool) -> Result<(), Box<dyn Error>> {
         if index >= self.queue.len() {
             return Err("Index out of bounds".into());
         }
@@ -162,24 +162,26 @@ impl MusicPlayer {
         self.player.stop();
         self.poll_preloaded();
 
-        if let Some((preloaded_index, source)) = self.preloaded_track.take() {
-            if preloaded_index == index {
-                self.player.append(source);
-            } else if let Some(track) = self.queue.get(index) {
-                let file = File::open(&track.path)?;
-                let source = Decoder::try_from(BufReader::new(file))?;
-                self.player.append(source);
-            }
-        } else if let Some(track) = self.queue.get(index) {
+        if let Some(track) = self.queue.get(index) {
             let file = File::open(&track.path)?;
             let source = Decoder::try_from(BufReader::new(file))?;
             self.player.append(source);
         }
 
-        self.track_start_time = Instant::now();
-        self.paused_elapsed = Duration::ZERO;
-        self.is_paused = false;
-        self.player.play();
+        if !start_offset.is_zero() {
+            let _ = self.player.try_seek(start_offset);
+        }
+
+        self.track_start_time = Instant::now() - start_offset;
+        self.paused_elapsed = start_offset;
+
+        if start_paused {
+            self.player.pause();
+            self.is_paused = true;
+        } else {
+            self.player.play();
+            self.is_paused = false;
+        }
 
         let next_index = self.next_index(false);
         self.preload_track(next_index);
@@ -251,7 +253,7 @@ impl MusicPlayer {
             return;
         }
         let next = self.next_index(true);
-        let _ = self.play_index(next);
+        let _ = self.play_index(next, Duration::ZERO, false);
     }
 
     pub(crate) fn previous(&mut self) -> Result<(), Box<dyn Error>> {
@@ -265,7 +267,7 @@ impl MusicPlayer {
             self.current_index.saturating_sub(1)
         };
 
-        self.play_index(new_index)
+        self.play_index(new_index, Duration::ZERO, false)
     }
 
     pub(crate) fn advance_track(&mut self) {
@@ -273,7 +275,7 @@ impl MusicPlayer {
             return;
         }
         let next = self.next_index(false);
-        let _ = self.play_index(next);
+        let _ = self.play_index(next, Duration::ZERO, false);
     }
 
     pub(crate) fn play_pause(&mut self) {
@@ -302,7 +304,7 @@ impl MusicPlayer {
     }
 
     pub(crate) fn jump_to(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
-        self.play_index(index)
+        self.play_index(index, Duration::ZERO, false)
     }
 
     pub(crate) fn current_track_info(&self) -> String {

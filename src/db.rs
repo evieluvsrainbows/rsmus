@@ -101,8 +101,8 @@ pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: impl AsRef<
         .collect();
 
     let album_count = scanned_tracks.iter().map(|t| &t.metadata.album).collect::<HashSet<_>>().len();
-
     let track_count = scanned_tracks.len();
+
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
@@ -142,6 +142,28 @@ pub(crate) fn load_repeat_mode(conn: &Connection) -> RepeatMode {
         },
         Err(_) => RepeatMode::Off,
     }
+}
+
+pub(crate) fn save_last_played_state(conn: &Connection, track_index: usize, progress_secs: usize) -> Result<()> {
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_index', ?1)", [track_index.to_string()])?;
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_progress', ?1)", [progress_secs.to_string()])?;
+    Ok(())
+}
+
+pub(crate) fn load_last_played_state(conn: &Connection) -> (usize, usize) {
+    let index: usize = conn
+        .query_row("SELECT value FROM settings WHERE key = 'last_track_index'", [], |row| row.get::<_, String>(0))
+        .ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or(0);
+
+    let progress: usize = conn
+        .query_row("SELECT value FROM settings WHERE key = 'last_track_progress'", [], |row| row.get::<_, String>(0))
+        .ok()
+        .and_then(|val| val.parse().ok())
+        .unwrap_or(0);
+
+    (index, progress)
 }
 
 pub(crate) fn fetch_sorted_tracks_from_db(conn: &Connection) -> Result<Vec<Track>> {

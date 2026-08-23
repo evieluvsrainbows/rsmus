@@ -1,5 +1,5 @@
 use crate::{
-    SharedState, TrackHierarchy,
+    SharedState, TrackHierarchy, db,
     player::{MusicPlayer, RepeatMode, Track},
     ui_utils, utils,
 };
@@ -58,10 +58,11 @@ pub(crate) fn construct_library_view(
     is_paused: bool,
 ) {
     let selection = select_view.selection();
-    let selected_key = selection.as_deref().map(|key| key);
+    let selected_key = selection.as_deref().cloned();
     select_view.clear();
 
     let mut target_index = None;
+    let mut current_track_view_index = None;
     let mut index_counter = 0;
 
     for (album_artist, albums) in hierarchy {
@@ -69,7 +70,7 @@ pub(crate) fn construct_library_view(
         let artist_icon = if artist_expanded { "▼" } else { "▶" };
 
         let artist_key = TreeItemKey::Artist(album_artist.clone());
-        if selected_key == Some(&artist_key) {
+        if selected_key.as_ref() == Some(&artist_key) {
             target_index = Some(index_counter);
         }
 
@@ -92,7 +93,7 @@ pub(crate) fn construct_library_view(
             let year = unsorted_tracks.first().map(|(_, t)| t.metadata.year.as_str()).unwrap_or("Unknown Year");
 
             let album_key = TreeItemKey::Album(album_artist.clone(), album.clone());
-            if selected_key == Some(&album_key) {
+            if selected_key.as_ref() == Some(&album_key) {
                 target_index = Some(index_counter);
             }
 
@@ -116,9 +117,9 @@ pub(crate) fn construct_library_view(
                 let track_key = TreeItemKey::Track(*global_idx);
                 let is_current_track = *global_idx == current_track_idx;
 
-                if selected_key == Some(&track_key) {
-                    target_index = Some(index_counter);
-                } else if is_current_track && target_index.is_none() {
+                if is_current_track {
+                    current_track_view_index = Some(index_counter);
+                } else if selected_key.as_ref() == Some(&track_key) {
                     target_index = Some(index_counter);
                 }
 
@@ -134,7 +135,8 @@ pub(crate) fn construct_library_view(
         }
     }
 
-    if let Some(idx) = target_index {
+    let final_selection = current_track_view_index.or(target_index);
+    if let Some(idx) = final_selection {
         select_view.set_selection(idx);
     }
 }
@@ -170,7 +172,6 @@ pub(crate) fn setup_ui_layout(
             if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
                 let sv = scroll_view.get_inner_mut();
                 let target_key = TreeItemKey::Track(target_idx);
-
                 if let Some(pos) = (0..sv.len()).position(|i| sv.get_item(i).map_or(false, |(_, k)| *k == target_key)) {
                     sv.set_selection(pos);
                 }
@@ -178,24 +179,27 @@ pub(crate) fn setup_ui_layout(
         }
     });
 
+    let (current_idx, is_paused, initial_info, initial_sec, initial_duration) = {
+        let mp = music_player.lock().map_err(|_| "Poisoned mutex")?;
+        let cur_idx = mp.current_index;
+        let is_p = mp.is_paused;
+        let info = mp.current_track_info().to_string();
+        let (sec, dur) = mp.get_current_progress();
+        (cur_idx, is_p, info, sec, dur)
+    };
+
     let artists_guard = expanded_artists.lock().unwrap();
     let albums_guard = expanded_albums.lock().unwrap();
     let borrowed_albums: BTreeSet<(&str, &str)> = albums_guard.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
 
-    construct_library_view(&mut select_view, hierarchy, &artists_guard, &borrowed_albums, 0, false);
+    construct_library_view(&mut select_view, hierarchy, &artists_guard, &borrowed_albums, current_idx, is_paused);
 
     drop(artists_guard);
     drop(albums_guard);
 
-    let (initial_info, initial_duration) = {
-        let mp = music_player.lock().map_err(|_| "Poisoned mutex")?;
-        let info = mp.current_track_info().to_string();
-        let duration = mp.queue.get(0).map(|t| t.metadata.duration.as_secs() as usize).unwrap_or(100);
-        (info, duration)
-    };
-
-    let initial_time_text = format!("0:00 / {}", utils::format_time(initial_duration));
-    let play_indicator = NamedView::new("play_indicator", TextView::new("▶ "));
+    let initial_indicator = if is_paused { "⏸ " } else { "▶ " };
+    let initial_time_text = format!("{} / {}", utils::format_time(initial_sec), utils::format_time(initial_duration));
+    let play_indicator = NamedView::new("play_indicator", TextView::new(initial_indicator));
     let track_info = NamedView::new("track_info", TextView::new(initial_info).no_wrap()).max_height(1);
     let time_label = NamedView::new("time_label", TextView::new(initial_time_text));
     let repeat_label = NamedView::new("repeat_label", TextView::new("[Repeat: Off]"));
@@ -412,6 +416,9 @@ pub(crate) fn spawn_playback_thread(
             let current_idx = mp.current_index;
             let is_paused = mp.is_paused;
             let (current_sec, total_sec) = mp.get_current_progress();
+            if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
+                let _ = db::save_last_played_state(&conn, current_idx, current_sec);
+            }
 
             if current_sec >= total_sec && total_sec > 0 {
                 mp.advance_track();

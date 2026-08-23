@@ -6,14 +6,12 @@ mod utils;
 
 use crate::player::{MusicPlayer, RepeatMode};
 use clap::Parser;
-use rodio::Decoder;
 use rusqlite::Connection;
 use std::{
     collections::BTreeMap,
     error::Error,
-    fs::File,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::Duration,
 };
 
 type TrackHierarchy = BTreeMap<String, BTreeMap<String, Vec<(usize, player::Track)>>>;
@@ -26,21 +24,13 @@ struct Args {
     scan: Option<String>,
 }
 
-fn initialize_player(playlist: Vec<player::Track>, repeat_mode: RepeatMode) -> Result<SharedState<MusicPlayer>, Box<dyn Error>> {
+fn initialize_player(playlist: Vec<player::Track>, repeat_mode: RepeatMode, last_index: usize, last_progress: usize) -> Result<SharedState<MusicPlayer>, Box<dyn Error>> {
     let music_player = Arc::new(Mutex::new(player::MusicPlayer::new(playlist, None, repeat_mode)?));
     {
         let mut mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
-        for track in &mp.queue {
-            let file = File::open(&track.path)?;
-            let source = Decoder::try_from(std::io::BufReader::new(file))?;
-            mp.player.append(source);
-        }
-        mp.track_start_time = Instant::now();
-
-        if let Some(track) = mp.queue.get(mp.current_index) {
-            let t = &track.metadata;
-            utils::update_terminal_title(&t.title, &t.artist, &t.album, &t.year, mp.is_paused);
-        }
+        let valid_index = if last_index < mp.queue.len() { last_index } else { 0 };
+        let offset = Duration::from_secs(last_progress as u64);
+        mp.play_index(valid_index, offset, true)?;
     }
     Ok(music_player)
 }
@@ -61,7 +51,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let repeat_mode = db::load_repeat_mode(&conn);
-    let music_player = initialize_player(playlist, repeat_mode)?;
+    let (last_index, last_progress) = db::load_last_played_state(&conn);
+    let music_player = initialize_player(playlist, repeat_mode, last_index, last_progress)?;
     let hierarchy = ui::build_hierarchy(&music_player)?;
     let (expanded_artists, expanded_albums) = ui::get_initial_expanded_states(&hierarchy);
     let mut siv = cursive::default();
