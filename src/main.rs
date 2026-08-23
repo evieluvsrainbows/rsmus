@@ -3,6 +3,7 @@ mod player;
 mod ui;
 mod utils;
 
+use crate::{player::RepeatMode, ui::TreeItemKey};
 use clap::Parser;
 use cursive::{
     event::{self, Event, Key},
@@ -21,8 +22,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use crate::{player::RepeatMode, ui::TreeItemKey};
 
 #[derive(Parser, Debug)]
 #[clap(about, version)]
@@ -166,7 +165,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    ui::rebuild_library_view(&mut select_view, &hierarchy, &expanded_artists.lock().unwrap(), &expanded_albums.lock().unwrap());
+    ui::construct_library_view(&mut select_view, &hierarchy, &expanded_artists.lock().unwrap(), &expanded_albums.lock().unwrap(), 0, false);
 
     let library_panel = Panel::new(NamedView::new("library_view", select_view.scrollable())).title("Music Library");
     let root_layout = LinearLayout::vertical().child(library_panel.full_height()).child(status_bar).full_screen();
@@ -176,11 +175,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let artists_for_space = Arc::clone(&expanded_artists);
     let albums_for_space = Arc::clone(&expanded_albums);
     let hierarchy_for_space = hierarchy.clone();
+    let player_for_space = Arc::clone(&music_player);
 
     siv.add_global_callback(' ', move |s| {
         if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
             let sv = scroll_view.get_inner_mut();
             if let Some(item_key) = sv.selection().map(|v| (*v).clone()) {
+                let (cur_idx, is_paused) = player_for_space.lock().map(|mp| (mp.current_index, mp.is_paused)).unwrap_or((0, false));
                 match item_key {
                     TreeItemKey::Artist(artist_name) => {
                         let mut artists = artists_for_space.lock().unwrap();
@@ -192,7 +193,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let artists_snapshot = artists.clone();
                         let albums_snapshot = albums_for_space.lock().unwrap().clone();
                         drop(artists);
-                        ui::rebuild_library_view(sv, &hierarchy_for_space, &artists_snapshot, &albums_snapshot);
+                        ui::construct_library_view(sv, &hierarchy_for_space, &artists_snapshot, &albums_snapshot, cur_idx, is_paused);
                     }
                     TreeItemKey::Album(artist_name, album_name) => {
                         let album_key = (artist_name, album_name);
@@ -205,7 +206,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let artists_snapshot = artists_for_space.lock().unwrap().clone();
                         let albums_snapshot = albums.clone();
                         drop(albums);
-                        ui::rebuild_library_view(sv, &hierarchy_for_space, &artists_snapshot, &albums_snapshot);
+                        ui::construct_library_view(sv, &hierarchy_for_space, &artists_snapshot, &albums_snapshot, cur_idx, is_paused);
                     }
                     TreeItemKey::Track(_) => {}
                 }
@@ -214,6 +215,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     });
 
     let player_for_thread = Arc::clone(&music_player);
+    let artists_for_thread = Arc::clone(&expanded_artists);
+    let albums_for_thread = Arc::clone(&expanded_albums);
+    let hierarchy_for_thread = hierarchy.clone();
     let sink = siv.cb_sink().clone();
 
     thread::spawn(move || {
@@ -258,19 +262,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             drop(mp);
 
+            let artists_snapshot = artists_for_thread.lock().unwrap().clone();
+            let albums_snapshot = albums_for_thread.lock().unwrap().clone();
+            let hierarchy_snapshot = hierarchy_for_thread.clone();
+
             let _ = sink.send(Box::new(move |s| {
                 s.call_on_name("play_indicator", |v: &mut TextView| v.set_content(indicator_text));
                 s.call_on_name("track_info", |v: &mut TextView| v.set_content(track_text));
                 s.call_on_name("time_label", |v: &mut TextView| v.set_content(time_text));
 
-                if index_changed {
+                if index_changed || paused_changed {
                     if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
                         let sv = scroll_view.get_inner_mut();
-                        let target_key = TreeItemKey::Track(current_idx);
-
-                        if let Some(pos) = (0..sv.len()).position(|i| sv.get_item(i).is_some_and(|(_, k)| *k == target_key)) {
-                            sv.set_selection(pos);
-                        }
+                        ui::construct_library_view(sv, &hierarchy_snapshot, &artists_snapshot, &albums_snapshot, current_idx, is_paused);
                     }
                 }
             }));

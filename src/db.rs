@@ -1,3 +1,5 @@
+use crate::player::{Track, TrackMetadata};
+use crate::utils;
 use audiotags::Tag;
 use rayon::prelude::*;
 use rusqlite::{Connection, Result, params};
@@ -9,9 +11,6 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-
-use crate::player::{Track, TrackMetadata};
-use crate::utils;
 
 pub(crate) fn initialize_database(conn: &Connection) -> Result<()> {
     conn.execute_batch(

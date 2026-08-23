@@ -1,8 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use cursive::views::SelectView;
-
 use crate::{player::Track, utils};
+use cursive::views::SelectView;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TreeItemKey {
@@ -11,11 +9,14 @@ pub(crate) enum TreeItemKey {
     Track(usize),
 }
 
-pub(crate) fn rebuild_library_view(
+/// Constructs the library view and its structure.
+pub(crate) fn construct_library_view(
     select_view: &mut SelectView<TreeItemKey>,
     hierarchy: &BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>,
     expanded_artists: &BTreeSet<String>,
     expanded_albums: &BTreeSet<(String, String)>,
+    current_track_idx: usize,
+    is_paused: bool,
 ) {
     let binding = select_view.selection();
     let selected_key = binding.as_deref().map(|arc| &*arc);
@@ -79,10 +80,11 @@ pub(crate) fn rebuild_library_view(
                     target_index = Some(index_counter);
                 }
 
+                let icon = if *global_idx == current_track_idx { if is_paused { "⏸ " } else { "♫ " } } else { "" };
                 let track_line = if m.album_artist != m.artist {
-                    format!("{child_prefix}    {track_branch} {}. {} ({}) [{duration_str}]", m.track_number, m.title, m.artist)
+                    format!("{child_prefix}    {track_branch} {}. {icon}{} ({}) [{duration_str}]", m.track_number, m.title, m.artist)
                 } else {
-                    format!("{child_prefix}    {track_branch} {}. {} [{duration_str}]", m.track_number, m.title)
+                    format!("{child_prefix}    {track_branch} {}. {icon}{} [{duration_str}]", m.track_number, m.title)
                 };
 
                 select_view.add_item(track_line, track_key);

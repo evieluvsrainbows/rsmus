@@ -1,3 +1,5 @@
+use rayon::prelude::*;
+use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source, source::Buffered};
 use std::{
     error::Error,
     fmt,
@@ -9,9 +11,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-
-use rayon::prelude::*;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source, source::Buffered};
 
 type PreloadedSource = Buffered<Decoder<BufReader<File>>>;
 
