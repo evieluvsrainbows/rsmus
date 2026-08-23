@@ -1,6 +1,7 @@
 mod db;
 mod player;
 mod ui;
+mod ui_utils;
 mod utils;
 
 use crate::player::{MusicPlayer, RepeatMode};
@@ -67,9 +68,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     ui::setup_cursive_theme_and_menu(&mut siv);
     ui::setup_ui_layout(&mut siv, &hierarchy, Arc::clone(&music_player), Arc::clone(&expanded_artists), Arc::clone(&expanded_albums))?;
-    ui::handle_repeat_mode(&mut siv.runner(), Arc::clone(&music_player));
-    ui::register_space_callback(&mut siv, &hierarchy, Arc::clone(&music_player), Arc::clone(&expanded_artists), Arc::clone(&expanded_albums));
-    ui::register_callbacks(&mut siv.runner(), Arc::clone(&music_player));
+    ui::handle_repeat_mode(&mut siv, Arc::clone(&music_player));
+    ui::register_callbacks(&mut siv, Arc::clone(&music_player), &hierarchy, Arc::clone(&expanded_artists), Arc::clone(&expanded_albums));
     ui::spawn_playback_thread(siv.cb_sink().clone(), Arc::clone(&music_player), hierarchy, expanded_artists, expanded_albums);
 
     siv.run();
