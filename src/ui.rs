@@ -81,11 +81,16 @@ pub(crate) fn construct_library_view(
                 let duration_str = utils::format_time(m.duration.as_secs() as usize);
 
                 let track_key = TreeItemKey::Track(*global_idx);
-                if selected_key == Some(&track_key) {
+                let is_current_track = *global_idx == current_track_idx;
+
+                if is_current_track {
+                    target_index = Some(index_counter);
+                } else if selected_key == Some(&track_key) && target_index.is_none() {
                     target_index = Some(index_counter);
                 }
 
-                let icon = if *global_idx == current_track_idx { if is_paused { "⏸ " } else { "♫ " } } else { "" };
+                let icon = if is_current_track { if is_paused { "⏸ " } else { "♫ " } } else { "" };
+
                 let track_line = if m.album_artist != m.artist {
                     format!("{child_prefix}    {track_branch} {}. {icon}{} ({}) [{duration_str}]", m.track_number, m.title, m.artist)
                 } else {
