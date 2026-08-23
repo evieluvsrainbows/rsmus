@@ -1,4 +1,4 @@
-use crate::player::{Track, TrackMetadata};
+use crate::player::{RepeatMode, Track, TrackMetadata};
 use crate::utils;
 use audiotags::Tag;
 use rayon::prelude::*;
@@ -128,6 +128,19 @@ pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Re
 
     println!("Successfully processed {} tracks across {} albums for database synchronization.", track_count, album_count);
     Ok(())
+}
+
+/// Retrieves the current repeat mode from the database.
+pub(crate) fn load_repeat_mode(conn: &Connection) -> RepeatMode {
+    match conn.query_row("SELECT value FROM settings WHERE key = 'repeat_mode'", [], |row| row.get::<_, String>(0)) {
+        Ok(val) => match val.as_str() {
+            "Single" => RepeatMode::Single,
+            "Album" => RepeatMode::Album,
+            "All" => RepeatMode::All,
+            _ => RepeatMode::Off,
+        },
+        Err(_) => RepeatMode::Off,
+    }
 }
 
 pub(crate) fn fetch_sorted_tracks_from_db(conn: &Connection) -> Result<Vec<Track>> {
