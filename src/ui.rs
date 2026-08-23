@@ -53,7 +53,7 @@ pub(crate) fn construct_library_view(
     select_view: &mut SelectView<TreeItemKey>,
     hierarchy: &BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>,
     expanded_artists: &BTreeSet<String>,
-    expanded_albums: &BTreeSet<(&str, &str)>, // Borrowed tuple keys avoid allocations on lookup
+    expanded_albums: &BTreeSet<(&str, &str)>,
     current_track_idx: usize,
     is_paused: bool,
 ) {
