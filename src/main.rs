@@ -168,7 +168,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     ui::construct_library_view(&mut select_view, &hierarchy, &expanded_artists.lock().unwrap(), &expanded_albums.lock().unwrap(), 0, false);
 
     let library_panel = Panel::new(NamedView::new("library_view", select_view.scrollable())).title("Music Library");
-    let root_layout = LinearLayout::vertical().child(library_panel.full_height()).child(status_bar).full_screen();
+    let prompt_bar = NamedView::new("prompt_bar", TextView::new("")).max_height(1);
+    let root_layout = LinearLayout::vertical().child(library_panel.full_height()).child(status_bar).child(prompt_bar).full_screen();
 
     siv.add_layer(root_layout);
 
@@ -374,7 +375,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    siv.add_global_callback('q', |s| s.quit());
+    siv.add_global_callback('q', |s| ui::show_quit_prompt(s));
     siv.add_global_callback(event::Key::Esc, |s| s.select_menubar());
     siv.run();
 
