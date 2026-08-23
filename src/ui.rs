@@ -62,7 +62,7 @@ pub(crate) fn construct_library_view(
     let selected_key = selection.as_deref().cloned();
     select_view.clear();
 
-    let mut user_target_index = None;
+    let mut target_index = None;
     let mut current_track_view_index = None;
     let mut index_counter = 0;
 
@@ -72,7 +72,7 @@ pub(crate) fn construct_library_view(
 
         let artist_key = TreeItemKey::Artist(album_artist.clone());
         if !force_highlight_current && selected_key.as_ref() == Some(&artist_key) {
-            user_target_index = Some(index_counter);
+            target_index = Some(index_counter);
         }
 
         select_view.add_item(format!("{artist_icon} {album_artist}"), artist_key);
@@ -95,7 +95,7 @@ pub(crate) fn construct_library_view(
 
             let album_key = TreeItemKey::Album(album_artist.clone(), album.clone());
             if !force_highlight_current && selected_key.as_ref() == Some(&album_key) {
-                user_target_index = Some(index_counter);
+                target_index = Some(index_counter);
             }
 
             select_view.add_item(format!("{album_branch} {album_icon} {album} ({year})"), album_key);
@@ -121,7 +121,7 @@ pub(crate) fn construct_library_view(
                 if is_current_track {
                     current_track_view_index = Some(index_counter);
                 } else if !force_highlight_current && selected_key.as_ref() == Some(&track_key) {
-                    user_target_index = Some(index_counter);
+                    target_index = Some(index_counter);
                 }
 
                 let icon = if is_current_track { if is_paused { "⏸ " } else { "♫ " } } else { "" };
@@ -139,9 +139,9 @@ pub(crate) fn construct_library_view(
     // Force highlight current playing track if requested (e.g. track changed)
     // otherwise preserve user selection if available.
     let final_selection = if force_highlight_current {
-        current_track_view_index.or(user_target_index)
+        current_track_view_index.or(target_index)
     } else {
-        user_target_index.or(current_track_view_index)
+        target_index.or(current_track_view_index)
     };
 
     if let Some(idx) = final_selection {
