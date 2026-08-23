@@ -181,19 +181,25 @@ impl MusicPlayer {
         self.is_paused = false;
         self.player.play();
 
-        let next_index = self.next_index();
+        let next_index = self.next_index(false);
         self.preload_track(next_index);
 
         Ok(())
     }
 
-    pub(crate) fn next_index(&self) -> usize {
+    pub(crate) fn next_index(&self, is_manual_skip: bool) -> usize {
         if self.queue.is_empty() {
             return 0;
         }
 
         match self.repeat_mode {
-            RepeatMode::Single => self.current_index,
+            RepeatMode::Single => {
+                if is_manual_skip {
+                    (self.current_index + 1) % self.queue.len()
+                } else {
+                    self.current_index
+                }
+            }
             RepeatMode::Album => {
                 let (start, end) = self.album_bounds(self.current_index);
                 if self.current_index >= end { start } else { self.current_index + 1 }
@@ -244,17 +250,30 @@ impl MusicPlayer {
         if self.queue.is_empty() {
             return;
         }
-        let next = self.next_index();
+        let next = self.next_index(true);
         let _ = self.play_index(next);
     }
 
     pub(crate) fn previous(&mut self) -> Result<(), Box<dyn Error>> {
-        let new_index = self.current_index.saturating_sub(1);
+        if self.queue.is_empty() {
+            return Ok(());
+        }
+
+        let new_index = if self.repeat_mode == RepeatMode::Single || self.repeat_mode == RepeatMode::All {
+            if self.current_index == 0 { self.queue.len() - 1 } else { self.current_index - 1 }
+        } else {
+            self.current_index.saturating_sub(1)
+        };
+
         self.play_index(new_index)
     }
 
     pub(crate) fn advance_track(&mut self) {
-        self.skip();
+        if self.queue.is_empty() {
+            return;
+        }
+        let next = self.next_index(false);
+        let _ = self.play_index(next);
     }
 
     pub(crate) fn play_pause(&mut self) {

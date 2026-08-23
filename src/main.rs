@@ -6,7 +6,6 @@ mod utils;
 use crate::{player::RepeatMode, ui::TreeItemKey};
 use clap::Parser;
 use cursive::{
-    event::{self, Event, Key},
     menu,
     theme::Theme,
     view::{Resizable, Scrollable},
@@ -282,101 +281,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let player_for_repeat_thread = Arc::clone(&music_player);
-    let repeat_sink = siv.cb_sink().clone();
+    ui::handle_repeat_mode(&mut siv.runner(), Arc::clone(&music_player));
+    ui::register_callbacks(&mut siv.runner(), Arc::clone(&music_player));
 
-    thread::spawn(move || {
-        let mut prev_repeat_mode = None;
-        loop {
-            thread::sleep(Duration::from_millis(150));
-
-            let Ok(mp) = player_for_repeat_thread.lock() else { break };
-            let current_repeat_mode = mp.repeat_mode;
-            drop(mp);
-
-            if Some(current_repeat_mode) == prev_repeat_mode {
-                continue;
-            }
-            prev_repeat_mode = Some(current_repeat_mode);
-
-            let repeat_text = match current_repeat_mode {
-                RepeatMode::Off => "[Repeat: Off]",
-                RepeatMode::Single => "[Repeat: Single]",
-                RepeatMode::Album => "[Repeat: Album]",
-                RepeatMode::All => "[Repeat: All]",
-            };
-
-            let _ = repeat_sink.send(Box::new(move |s| {
-                s.call_on_name("repeat_label", |v: &mut TextView| v.set_content(repeat_text));
-            }));
-        }
-    });
-
-    let player_for_meta = Arc::clone(&music_player);
-    siv.add_global_callback('m', move |s| {
-        if let Ok(mp) = player_for_meta.lock() {
-            if let Some(track) = mp.queue.get(mp.current_index) {
-                let m = &track.metadata;
-                let meta_text = format!(
-                    "Title: {}\nArtist: {}\nAlbum Artist: {}\nAlbum: {}\nYear: {}\nTrack Number: {}\nDuration: {}\nPath: {}",
-                    m.title,
-                    m.artist,
-                    m.album_artist,
-                    m.album,
-                    m.year,
-                    m.track_number,
-                    utils::format_time(m.duration.as_secs() as usize),
-                    track.path.display()
-                );
-
-                s.add_layer(Dialog::around(TextView::new(meta_text)).title(format!("Track Metadata for {}", m.title)).button("Close", |s| {
-                    s.pop_layer();
-                }));
-            }
-        }
-    });
-
-    let player_for_c = Arc::clone(&music_player);
-    siv.add_global_callback('c', move |_| {
-        if let Ok(mut mp) = player_for_c.lock() {
-            mp.play_pause();
-        }
-    });
-
-    let player_for_repeat = Arc::clone(&music_player);
-
-    siv.add_global_callback('r', move |_| {
-        if let Ok(mut mp) = player_for_repeat.lock() {
-            mp.toggle_repeat_mode();
-            let mode_str = match mp.repeat_mode {
-                RepeatMode::Off => "Off",
-                RepeatMode::Single => "Single",
-                RepeatMode::Album => "Album",
-                RepeatMode::All => "All",
-            };
-
-            if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
-                let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('repeat_mode', ?1)", [&mode_str]);
-            }
-        }
-    });
-
-    let player_for_prev = Arc::clone(&music_player);
-    siv.add_global_callback(Event::Key(Key::Left), move |_| {
-        if let Ok(mut mp) = player_for_prev.lock() {
-            let _ = mp.previous();
-        }
-    });
-
-    let player_for_next = Arc::clone(&music_player);
-    siv.add_global_callback(Event::Key(Key::Right), move |_| {
-        if let Ok(mut mp) = player_for_next.lock() {
-            let _ = mp.skip();
-        }
-    });
-
-    siv.add_global_callback('q', |s| ui::show_quit_prompt(s));
-    siv.add_global_callback(event::Key::Esc, |s| s.select_menubar());
     siv.run();
 
     Ok(())
