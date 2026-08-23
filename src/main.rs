@@ -61,10 +61,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let repeat_mode = db::load_repeat_mode(&conn);
     let music_player = initialize_player(playlist, repeat_mode)?;
-
     let hierarchy = ui::build_hierarchy(&music_player)?;
     let (expanded_artists, expanded_albums) = ui::get_initial_expanded_states(&hierarchy);
-
     let mut siv = cursive::default();
 
     ui::setup_cursive_theme_and_menu(&mut siv);

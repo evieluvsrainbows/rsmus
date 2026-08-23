@@ -14,7 +14,7 @@ use std::{
 
 pub(crate) fn initialize_database(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS tracks (
+        "CREATE TABLE IF NOT EXISTS tracks(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             artist TEXT NOT NULL,
@@ -26,13 +26,14 @@ pub(crate) fn initialize_database(conn: &Connection) -> Result<()> {
             path TEXT NOT NULL UNIQUE
         );
 
-        CREATE TABLE IF NOT EXISTS settings (
+        CREATE TABLE IF NOT EXISTS settings(
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_tracks_sorting
-        ON tracks (COALESCE(NULLIF(album_artist, ''), artist), album, track_number, title);",
+        CREATE INDEX IF NOT EXISTS idx_tracks_sorting ON tracks(
+            COALESCE(NULLIF(album_artist, ''), artist), album, track_number, title
+        );",
     )?;
 
     Ok(())
@@ -64,9 +65,7 @@ fn collect_audio_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::
 
 fn extract_track_metadata(filepath: &Path) -> TrackMetadata {
     let fallback_name = filepath.file_name().and_then(|n| n.to_str()).unwrap_or("Unknown File");
-
     let tag = Tag::default().read_from_path(filepath).ok();
-
     let duration_secs = tag.as_ref().and_then(|t| t.duration()).map(|d| d as u64).unwrap_or(0);
 
     TrackMetadata {
@@ -80,17 +79,17 @@ fn extract_track_metadata(filepath: &Path) -> TrackMetadata {
     }
 }
 
-pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Result<(), Box<dyn Error>> {
-    let input_path = PathBuf::from(input_dir);
+pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+    let input_path = input_dir.as_ref();
     if !input_path.is_dir() {
-        return Err(format!("Specified path is not a valid directory: {}", input_dir).into());
+        return Err(format!("Specified path is not a valid directory: {}", input_path.display()).into());
     }
 
     let mut entries = Vec::new();
-    collect_audio_files(&input_path, &mut entries)?;
+    collect_audio_files(input_path, &mut entries)?;
 
     if entries.is_empty() {
-        return Err(format!("No supported music files found in directory or subdirectories: {}", input_dir).into());
+        return Err(format!("No supported music files found in directory: {}", input_path.display()).into());
     }
 
     let scanned_tracks: Vec<Track> = entries
@@ -101,9 +100,9 @@ pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Re
         })
         .collect();
 
-    let track_count = scanned_tracks.len();
     let album_count = scanned_tracks.iter().map(|t| &t.metadata.album).collect::<HashSet<_>>().len();
 
+    let track_count = scanned_tracks.len();
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
@@ -112,6 +111,8 @@ pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Re
         )?;
 
         for track in &scanned_tracks {
+            let path_str = track.path.to_str().ok_or("Path contains invalid UTF-8")?;
+
             stmt.execute(params![
                 track.metadata.title,
                 track.metadata.artist,
@@ -120,7 +121,7 @@ pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: &str) -> Re
                 track.metadata.track_number,
                 track.metadata.year,
                 track.metadata.duration.as_secs() as i64,
-                track.path.to_string_lossy()
+                path_str
             ])?;
         }
     }
