@@ -14,7 +14,7 @@ To get started with rsmus, follow the following steps.
 If desired, you can combine steps 3 and 4 into a single step for a faster initial setup and app launch:
 
 ```bash
-cargo run --release -- --scan \<directory> && cargo run --release
+cargo run --release -- --scan <directory> && cargo run --release
 ```
 
 For future app launches, if there is no need to scan additional music into the database, only `cargo run --release` is needed.
