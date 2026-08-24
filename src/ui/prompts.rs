@@ -1,22 +1,12 @@
-use crate::player::MusicPlayer;
 use cursive::{
     Cursive, event,
     theme::{Color, Style},
     utils::markup::StyledString,
-    views::{Dialog, TextView},
+    views::TextView,
 };
-use std::sync::{Arc, Mutex};
 
-pub(crate) fn show_metadata(siv: &mut Cursive, music_player: Arc<Mutex<MusicPlayer>>) {
-    let Ok(mp) = music_player.lock() else { return };
-    let Some(track) = mp.queue.get(mp.current_index) else { return };
-    let meta_text = format!("{}\nPath:          {}", track.metadata, track.path.display());
-    let dialog = Dialog::around(TextView::new(meta_text)).title(format!("Metadata for {}", track.metadata.title)).button("Close", |s| {
-        s.pop_layer();
-    });
-    siv.add_layer(dialog);
-}
-
+/// Shows a prompt below the status bar line prompting the user if they
+/// want to quit the application.
 pub(crate) fn show_quit_prompt(siv: &mut Cursive) {
     siv.call_on_name("prompt_bar", |v: &mut TextView| {
         let style = Style::from(Color::Rgb(255, 238, 140));

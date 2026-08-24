@@ -1,7 +1,6 @@
 mod db;
 mod player;
 mod ui;
-mod ui_utils;
 mod utils;
 
 use clap::Parser;
@@ -41,8 +40,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let repeat_mode = db::load_repeat_mode(&conn);
     let (last_index, last_progress) = db::load_last_played_state(&conn);
     let music_player = utils::initialize_player(playlist, repeat_mode, last_index, last_progress)?;
-    let hierarchy = ui::build_hierarchy(&music_player)?;
-    let (expanded_artists, expanded_albums) = ui::get_initial_expanded_states(&hierarchy);
+    let hierarchy = ui::library::build_hierarchy(&music_player)?;
+    let (expanded_artists, expanded_albums) = ui::library::get_initial_expanded_states(&hierarchy);
     let mut siv = cursive::default();
 
     ui::setup_cursive_theme_and_menu(&mut siv, music_player.clone());
