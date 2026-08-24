@@ -1,6 +1,6 @@
 # rsmus
 
-A music player written in Rust for the modern CLI era.
+A terminal-based music player written in Rust.
 
 ## Getting started
 
@@ -20,11 +20,12 @@ cargo run --release -- --scan <directory> && cargo run --release
 For future app launches, if there is no need to scan additional music into the database, only `cargo run --release` is needed.
 
 > [!NOTE]
-> rsmus *might* be added to crates.io later on as a directly installable binary when it is determined to be stable
-enough, but it is not guaranteed that it will be added.
+> rsmus *might* be added to crates.io later on as a directly installable binary when it is determined to be stable enough, 
+but it is not guaranteed that it will be added.
 
 ## Features
-The following is a list of features currently offered by rsmus. Additional features are planned and will be added later on.
+The following is a list of features currently offered by rsmus. Additional features are planned and will be added later
+on.
 
 * Basic music library - shows your artists, albums, and the tracks associated with them in a tree-like view.
   * Artists and albums can be individually collapsed or expanded to allow focusing on specific artists or albums.
@@ -33,16 +34,17 @@ The following is a list of features currently offered by rsmus. Additional featu
 * Metdata dialog - shows the track metadata of the currently playing track.
 
 > [!NOTE]
-> Collapsed/expanded states for artists or albums do not yet persist across app launches, but it is eventually planned
-to support this.
+> Collapsed/expanded states for artists or albums do not yet persist across app launches, but it is eventually
+planned to support this.
 
 ## Performance
 Please note that performance of rsmus with large media libraries has not been tested. I have a small local media library
 consisting of ~75 tracks, and observed performance has been fine from what has been observed with that number of tracks on
 my M3 Max MacBook Pro when running rsmus in the [ghostty](https://ghostty.org) terminal emulator, but I have not tested it
-on any other machines, hardware, or terminal emulators. Therefore, your mileage may vary on how rsmus performs on your particular
-machine and terminal emulator, so if any issues with performance arise, please file an issue on GitHub and I will take a look, or if
-you know your way around Rust programming, feel free to submit a pull request containing any potential performance optimisations.
+on any other machines, hardware, or terminal emulators. Therefore, depending on your particular machine, terminal emulator,
+and the size of your music library, your mileage may vary on how rsmus performs, so if any issues with performance arise, please
+file an issue on GitHub and I will take a look, or if you know your way around Rust programming, feel free to submit a pull request
+containing any potential performance optimisations.
 
 As rsmus' main backend libraries (rusqlite, cursive) are synchronous rather than asynchronous, it is primarily single-threaded. A move
 to async would be difficult without a migration to an async-compatible TUI library and SQLite wrapper like ratatui and sqlx, and that
