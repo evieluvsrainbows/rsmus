@@ -7,23 +7,52 @@ use cursive::{
     CbSink, Cursive,
     event::{self, Event, Key},
     menu,
-    theme::Theme,
+    theme::{Effect, Style, Theme},
+    utils::markup::StyledString,
     view::{Resizable, Scrollable},
     views::{Dialog, DummyView, LinearLayout, NamedView, Panel, ScrollView, SelectView, TextView},
 };
+use rayon::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Sender},
+    },
     thread,
     time::Duration,
 };
+
+pub(crate) enum DbTask {
+    SaveState(usize, usize),
+    SaveSetting(String, String),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TreeItemKey {
     Artist(String),
     Album(String, String),
     Track(usize),
+}
+
+/// Initializes a background thread to handle all SQLite disk I/O off the UI thread.
+fn spawn_db_worker() -> Sender<DbTask> {
+    let (tx, rx) = mpsc::channel::<DbTask>();
+    thread::spawn(move || {
+        let Ok(conn) = rusqlite::Connection::open("rsmus.db") else { return };
+        while let Ok(task) = rx.recv() {
+            match task {
+                DbTask::SaveState(idx, sec) => {
+                    let _ = db::save_last_played_state(&conn, idx, sec);
+                }
+                DbTask::SaveSetting(key, val) => {
+                    let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", [&key, &val]);
+                }
+            }
+        }
+    });
+    tx
 }
 
 /// Initializes the cursive menubar and sets the theme to be used by it.
@@ -42,26 +71,19 @@ pub(crate) fn get_initial_expanded_states(hierarchy: &TrackHierarchy) -> (Shared
             initial_albums.insert((artist.clone(), album.clone()));
         }
     }
-
     (Arc::new(Mutex::new(initial_artists)), Arc::new(Mutex::new(initial_albums)))
 }
 
-/// Constructs the library view and its structure. This function is called
-/// whenever the library view needs to update, e.g. when changing tracks or
-/// collapsing or expanding an artist or album.
-pub(crate) fn construct_library_view(
-    select_view: &mut SelectView<TreeItemKey>,
+fn generate_library_items(
     hierarchy: &BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>,
     expanded_artists: &BTreeSet<String>,
     expanded_albums: &BTreeSet<(&str, &str)>,
     current_track_idx: usize,
     is_paused: bool,
     force_highlight_current: bool,
-) {
-    let selection = select_view.selection();
-    let selected_key = selection.as_deref().cloned();
-    select_view.clear();
-
+    selected_key: Option<&TreeItemKey>,
+) -> (Vec<(StyledString, TreeItemKey)>, Option<usize>) {
+    let mut items = Vec::new();
     let mut target_index = None;
     let mut current_track_view_index = None;
     let mut index_counter = 0;
@@ -69,13 +91,12 @@ pub(crate) fn construct_library_view(
     for (album_artist, albums) in hierarchy {
         let artist_expanded = expanded_artists.contains(album_artist);
         let artist_icon = if artist_expanded { "▼" } else { "▶" };
-
         let artist_key = TreeItemKey::Artist(album_artist.clone());
-        if !force_highlight_current && selected_key.as_ref() == Some(&artist_key) {
+        if !force_highlight_current && selected_key == Some(&artist_key) {
             target_index = Some(index_counter);
         }
 
-        select_view.add_item(format!("{artist_icon} {album_artist}"), artist_key);
+        items.push((StyledString::plain(format!("{artist_icon} {album_artist}")), artist_key));
         index_counter += 1;
 
         if !artist_expanded {
@@ -94,11 +115,11 @@ pub(crate) fn construct_library_view(
             let year = unsorted_tracks.first().map(|(_, t)| t.metadata.year.as_str()).unwrap_or("Unknown Year");
 
             let album_key = TreeItemKey::Album(album_artist.clone(), album.clone());
-            if !force_highlight_current && selected_key.as_ref() == Some(&album_key) {
+            if !force_highlight_current && selected_key == Some(&album_key) {
                 target_index = Some(index_counter);
             }
 
-            select_view.add_item(format!("{album_branch} {album_icon} {album} ({year})"), album_key);
+            items.push((StyledString::plain(format!("{album_branch} {album_icon} {album} ({year})")), album_key));
             index_counter += 1;
 
             if !album_expanded {
@@ -117,32 +138,61 @@ pub(crate) fn construct_library_view(
 
                 let track_key = TreeItemKey::Track(*global_idx);
                 let is_current_track = *global_idx == current_track_idx;
-
                 if is_current_track {
                     current_track_view_index = Some(index_counter);
-                } else if !force_highlight_current && selected_key.as_ref() == Some(&track_key) {
+                } else if !force_highlight_current && selected_key == Some(&track_key) {
                     target_index = Some(index_counter);
                 }
 
-                let icon = if is_current_track { if is_paused { "⏸ " } else { "♫ " } } else { "" };
+                let icon = if is_current_track { if is_paused { "⏸ " } else { "▶ " } } else { "" };
                 let artist_extra = if m.album_artist != m.artist { format!(" ({})", m.artist) } else { String::new() };
-                let track_line = format!("{child_prefix}    {track_branch} {}. {icon}{}{artist_extra} [{duration_str}]", m.track_number, m.title);
 
-                select_view.add_item(track_line, track_key);
+                let prefix = format!("{child_prefix}    {track_branch} {}. {icon}", m.track_number);
+                let suffix = format!("{artist_extra} [{duration_str}]");
+
+                let mut styled_label = StyledString::plain(&prefix);
+                if is_current_track {
+                    styled_label.append_styled(&m.title, Style::from(Effect::Bold));
+                } else {
+                    styled_label.append_plain(&m.title);
+                }
+                styled_label.append_plain(&suffix);
+
+                items.push((styled_label, track_key));
                 index_counter += 1;
             }
         }
     }
 
-    // Force highlight current playing track if requested (e.g. track changed)
-    // otherwise preserve user selection if available.
     let final_selection = if force_highlight_current {
         current_track_view_index.or(target_index)
     } else {
         target_index.or(current_track_view_index)
     };
 
-    if let Some(idx) = final_selection {
+    (items, final_selection)
+}
+
+pub(crate) fn construct_library_view(
+    select_view: &mut SelectView<TreeItemKey>,
+    hierarchy: &BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>,
+    expanded_artists: &BTreeSet<String>,
+    expanded_albums: &BTreeSet<(&str, &str)>,
+    current_track_idx: usize,
+    is_paused: bool,
+    force_highlight_current: bool,
+) {
+    let selection = select_view.selection();
+    let selected_key = selection.as_deref();
+
+    let (items, selection_idx) = generate_library_items(hierarchy, expanded_artists, expanded_albums, current_track_idx, is_paused, force_highlight_current, selected_key);
+
+    select_view.clear();
+    for (label, key) in items {
+        select_view.add_item(label, key);
+    }
+
+    if let Some(idx) = selection_idx {
         select_view.set_selection(idx);
     }
 }
@@ -241,18 +291,17 @@ pub(crate) fn build_hierarchy(music_player: &SharedState<MusicPlayer>) -> Result
         }
     }
 
-    for albums in hierarchy.values_mut() {
-        for tracks in albums.values_mut() {
-            tracks.sort_by_key(|(_, track)| track.metadata.track_number);
-        }
-    }
+    hierarchy.par_iter_mut().for_each(|(_, albums)| {
+        albums.par_iter_mut().for_each(|(_, tracks)| {
+            tracks.sort_unstable_by_key(|(_, track)| track.metadata.track_number);
+        });
+    });
 
     Ok(hierarchy)
 }
 
 pub(crate) fn handle_repeat_mode(siv: &mut Cursive, music_player: Arc<Mutex<MusicPlayer>>) {
     let repeat_sink = siv.cb_sink().clone();
-
     thread::spawn(move || {
         let mut prev_repeat_mode = None;
         loop {
@@ -288,6 +337,8 @@ pub(crate) fn register_callbacks(
     expanded_artists: SharedState<BTreeSet<String>>,
     expanded_albums: SharedState<BTreeSet<(String, String)>>,
 ) {
+    let db_tx = spawn_db_worker();
+
     let artists_for_space = Arc::clone(&expanded_artists);
     let albums_for_space = Arc::clone(&expanded_albums);
     let hierarchy_for_space = hierarchy.clone();
@@ -332,6 +383,7 @@ pub(crate) fn register_callbacks(
         }
     });
 
+    // Key binding for opening the track metadata dialog.
     let player_for_meta = Arc::clone(&music_player);
     siv.add_global_callback('m', move |s| {
         if let Ok(mp) = player_for_meta.lock() {
@@ -355,6 +407,7 @@ pub(crate) fn register_callbacks(
         }
     });
 
+    // Key binding for playing or pausing the current track.
     let player_for_playback = Arc::clone(&music_player);
     siv.add_global_callback('c', move |_| {
         if let Ok(mut mp) = player_for_playback.lock() {
@@ -362,6 +415,7 @@ pub(crate) fn register_callbacks(
         }
     });
 
+    // Key binding for toggling the repeat state.
     let player_for_repeat = Arc::clone(&music_player);
     siv.add_global_callback('r', move |_| {
         if let Ok(mut mp) = player_for_repeat.lock() {
@@ -372,15 +426,11 @@ pub(crate) fn register_callbacks(
                 RepeatMode::Album => "Album",
                 RepeatMode::All => "All",
             };
-
-            if let Ok(conn) = rusqlite::Connection::open("rsmus.db") {
-                let _ = conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('repeat_mode', ?1)", [&mode_str]);
-            }
+            let _ = db_tx.send(DbTask::SaveSetting("repeat_mode".into(), mode_str.into()));
         }
     });
 
-    // keybinding callback for rewinding the currently playing
-    // track by 10 seconds
+    // Key binding for rewinding a track by 10 seconds.
     let player_for_rewind = Arc::clone(&music_player);
     siv.add_global_callback('b', move |_| {
         if let Ok(mut mp) = player_for_rewind.lock() {
@@ -388,8 +438,7 @@ pub(crate) fn register_callbacks(
         }
     });
 
-    // keybinding callback for forwarding the currently plaiyng
-    // track by 10 seconds
+    // Key binding for fast forwarding a track by 10 seconds.
     let player_for_forward = Arc::clone(&music_player);
     siv.add_global_callback('n', move |_| {
         if let Ok(mut mp) = player_for_forward.lock() {
@@ -397,7 +446,7 @@ pub(crate) fn register_callbacks(
         }
     });
 
-    // keybinding callback for going back a track
+    // Key binding for rewinding to the previous track.
     let player_for_prev = Arc::clone(&music_player);
     siv.add_global_callback(Event::Key(Key::Left), move |_| {
         if let Ok(mut mp) = player_for_prev.lock() {
@@ -405,7 +454,7 @@ pub(crate) fn register_callbacks(
         }
     });
 
-    // keybinding callback for going forward a track
+    // Key binding for skipping to the next track.
     siv.add_global_callback(Event::Key(Key::Right), move |_| {
         if let Ok(mut mp) = music_player.lock() {
             let _ = mp.skip();
@@ -427,14 +476,13 @@ pub(crate) fn spawn_playback_thread(
     let artists_for_thread = Arc::clone(&expanded_artists);
     let albums_for_thread = Arc::clone(&expanded_albums);
     let hierarchy_for_thread = hierarchy;
+    let db_tx = spawn_db_worker();
 
     thread::spawn(move || {
         let mut prev_idx = usize::MAX;
         let mut prev_paused = false;
         let mut prev_time_text = String::new();
         let mut has_advanced = false;
-
-        let conn = rusqlite::Connection::open("rsmus.db").ok();
 
         loop {
             thread::sleep(Duration::from_millis(250));
@@ -444,10 +492,7 @@ pub(crate) fn spawn_playback_thread(
             };
 
             let (current_sec, total_sec) = mp.get_current_progress();
-
-            if let Some(ref c) = conn {
-                let _ = db::save_last_played_state(c, mp.current_index, current_sec);
-            }
+            let _ = db_tx.send(DbTask::SaveState(mp.current_index, current_sec));
 
             if current_sec >= total_sec && total_sec > 0 {
                 if !has_advanced {
@@ -494,15 +539,29 @@ pub(crate) fn spawn_playback_thread(
             drop(artists_guard);
             drop(albums_guard);
 
+            let (view_items, selection_idx) = if index_changed || paused_changed {
+                let borrowed_albums: BTreeSet<(&str, &str)> = albums_snapshot.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+                let (items, sel) = generate_library_items(&hierarchy_snapshot, &artists_snapshot, &borrowed_albums, current_idx, is_paused, index_changed, None);
+                (Some(items), sel)
+            } else {
+                (None, None)
+            };
+
             let _ = sink.send(Box::new(move |s| {
                 s.call_on_name("play_indicator", |v: &mut TextView| v.set_content(indicator_text));
                 s.call_on_name("track_info", |v: &mut TextView| v.set_content(track_text));
                 s.call_on_name("time_label", |v: &mut TextView| v.set_content(time_text));
-                if index_changed || paused_changed {
+
+                if let Some(items) = view_items {
                     if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
                         let sv = scroll_view.get_inner_mut();
-                        let borrowed_albums: BTreeSet<(&str, &str)> = albums_snapshot.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-                        construct_library_view(sv, &hierarchy_snapshot, &artists_snapshot, &borrowed_albums, current_idx, is_paused, index_changed);
+                        sv.clear();
+                        for (label, key) in items {
+                            sv.add_item(label, key);
+                        }
+                        if let Some(idx) = selection_idx {
+                            sv.set_selection(idx);
+                        }
                     }
                 }
             }));

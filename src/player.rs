@@ -342,10 +342,12 @@ impl MusicPlayer {
         }
     }
 
+    // Fast forwards a track by 10 seconds.
     pub(crate) fn seek_forward(&mut self) {
         self.seek_relative(10.0);
     }
 
+    // Rewinds a track by 10 seconds.
     pub(crate) fn seek_backward(&mut self) {
         self.seek_relative(-10.0);
     }
