@@ -51,9 +51,6 @@ kind of move is not yet planned.
 ## Keyboard shortcuts
 The following table contains a list of keybindings used by rsmus for its various features. 
 
-> [!NOTE]
-> These keyboard shortcuts are currently hardcoded and cannot yet be customized or rebound.
-
 | Function                | Shortcut         |
 | -------------           | -------------    |
 | Navigate Library        | `Up` / `Down`    |
@@ -65,6 +62,9 @@ The following table contains a list of keybindings used by rsmus for its various
 | Toggle Repeat State     | `r`              |
 | View Track Metadata     | `m`              |
 | Quit                    | `q`              |
+
+> [!NOTE]
+> The above keyboard shortcuts are currently hardcoded and cannot yet be customized or rebound.
 
 ## Licence
 
