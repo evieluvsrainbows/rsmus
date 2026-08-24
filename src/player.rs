@@ -124,7 +124,7 @@ impl MusicPlayer {
         Ok(instance)
     }
 
-    pub(crate) fn preload_track(&mut self, index: usize) {
+    fn preload_track(&mut self, index: usize) {
         let Some(track) = self.queue.get(index).cloned() else {
             return;
         };
@@ -142,7 +142,7 @@ impl MusicPlayer {
         });
     }
 
-    pub(crate) fn poll_preloaded(&mut self) {
+    fn poll_preloaded(&mut self) {
         if let Some(ref rx) = self.preload_rx {
             if let Ok(result) = rx.try_recv() {
                 if let Ok(data) = result {
@@ -189,7 +189,7 @@ impl MusicPlayer {
         Ok(())
     }
 
-    pub(crate) fn next_index(&self, is_manual_skip: bool) -> usize {
+    fn next_index(&self, is_manual_skip: bool) -> usize {
         if self.queue.is_empty() {
             return 0;
         }
@@ -211,7 +211,7 @@ impl MusicPlayer {
         }
     }
 
-    pub(crate) fn album_bounds(&self, index: usize) -> (usize, usize) {
+    fn album_bounds(&self, index: usize) -> (usize, usize) {
         if self.queue.is_empty() || index >= self.queue.len() {
             return (0, 0);
         }
@@ -307,11 +307,11 @@ impl MusicPlayer {
         self.play_index(index, Duration::ZERO, false)
     }
 
-    pub(crate) fn get_elapsed(&self) -> Duration {
+    fn get_elapsed(&self) -> Duration {
         if self.is_paused { self.paused_elapsed } else { self.track_start_time.elapsed() }
     }
 
-    pub(crate) fn seek_relative(&mut self, seconds: f64) {
+    fn seek_relative(&mut self, seconds: f64) {
         let Some(track) = self.queue.get(self.current_index) else {
             return;
         };

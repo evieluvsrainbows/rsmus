@@ -8,11 +8,19 @@ To get started with rsmus, follow the following steps.
 
 1. Download the repository (either as a zip file or cloning via git)
 2. Navigate to the location where you downloaded, or cloned, rsmus.
-3. Run `cargo run --release -- --scan \<directory>` to build rsmus and scan your music directory into rsmus' database.
+3. Run `cargo run --release -- --scan \<directory>` to build rsmus and scan your music directory into its database.
 4. Run `cargo run --release` without arguments to launch rsmus.
 
+If desired, you can combine steps 3 and 4 into a single step for a faster initial setup and app launch:
+
+```bash
+cargo run --release -- --scan \<directory> && cargo run --release
+```
+
+For future app launches, if there is no need to scan additional music into the database, only `cargo run --release` is needed.
+
 **NOTE**: rsmus *might* be added to crates.io later on as a directly installable binary when it is determined to be stable
-enough.
+enough, but it is not guaranteed that it will be added.
 
 ## Features
 The following is a list of features currently offered by rsmus. Additional features are planned and will be added later on.
