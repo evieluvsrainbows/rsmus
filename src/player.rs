@@ -1,3 +1,7 @@
+use cursive::{
+    theme::{Effect, Style},
+    utils::markup::StyledString,
+};
 use rayon::prelude::*;
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source, source::Buffered};
 use std::{
@@ -377,14 +381,22 @@ impl MusicPlayer {
         self.seek_relative(-10.0);
     }
 
-    pub(crate) fn current_track_info(&self) -> String {
+    pub(crate) fn current_track_info(&self) -> StyledString {
         if let Some(track) = self.queue.get(self.current_index) {
-            let t = &track.metadata;
-            format!("{} by {} on {} ({})", t.title, t.artist, t.album, t.year)
+            let track = &track.metadata;
+            let mut styled = StyledString::new();
+            let bold = Style::from(Effect::Bold);
+            styled.append_styled(&track.title, bold);
+            styled.append_plain(" by ");
+            styled.append_styled(&track.artist, bold);
+            styled.append_plain(" on ");
+            styled.append_styled(&track.album, bold);
+            styled.append_plain(format!(" ({})", track.year));
+            styled
         } else if self.queue.is_empty() {
-            "No tracks loaded".to_string()
+            StyledString::plain("No tracks loaded")
         } else {
-            "Playback Finished".to_string()
+            StyledString::plain("Playback Finished")
         }
     }
 

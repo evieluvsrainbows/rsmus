@@ -108,7 +108,7 @@ pub(crate) fn setup_ui_layout(
         let mp = mp.lock().map_err(|_| "Poisoned mutex")?;
         let cur_idx = mp.current_index;
         let is_p = mp.is_paused;
-        let info = mp.current_track_info().to_string();
+        let info = mp.current_track_info();
         let (sec, dur) = mp.get_current_progress();
         (cur_idx, is_p, info, sec, dur)
     };
@@ -342,7 +342,7 @@ pub(crate) fn spawn_playback_thread(
                 prev_paused = is_paused;
             }
 
-            let track_text = mp.current_track_info().to_string();
+            let track_text = mp.current_track_info();
             let time_text = format!("{} / {}", utils::format_time(current_sec), utils::format_time(total_sec));
             let indicator_text = if is_paused { "⏸ " } else { "▶ " };
 
