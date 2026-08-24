@@ -17,11 +17,19 @@ If desired, you can combine steps 3 and 4 into a single step for a faster initia
 cargo run --release -- --scan <directory> && cargo run --release
 ```
 
-For future app launches, if there is no need to scan additional music into the database, only `cargo run --release` is needed.
+> [!NOTE]
+> If you rename or remove any tracks / directories from the music folder where you imported music from, please ensure that you
+> re-run the following command to ensure that the database is properly updated:
+> ```bash
+> cargo run --release -- --scan <directory>
+> ```
+
+For future app launches, if there is no need to scan additional music into the database and if there have been no updates to the
+directory (or directories) you imported music from, only `cargo run --release` is needed.
 
 > [!NOTE]
 > rsmus *might* be added to crates.io later on as a directly installable binary when it is determined to be stable enough, 
-but it is not guaranteed that it will be added.
+> but it is not guaranteed that it will be added.
 
 ## Features
 The following is a list of features currently offered by rsmus. Additional features are planned and will be added later
@@ -35,7 +43,7 @@ on.
 
 > [!NOTE]
 > Collapsed/expanded states for artists or albums do not yet persist across app launches, but it is eventually
-planned to support this.
+> planned to support this.
 
 ## Performance
 Please note that performance of rsmus with large media libraries has not been tested. I have a small local media library

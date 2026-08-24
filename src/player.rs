@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::utils;
+
 type PreloadedSource = Buffered<Decoder<BufReader<File>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -62,6 +64,29 @@ pub(crate) struct TrackMetadata {
     pub year: String,
     pub track_number: u16,
     pub duration: Duration,
+}
+
+impl fmt::Display for TrackMetadata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let fields: [(&str, String); 7] = [
+            ("Title", self.title.clone()),
+            ("Artist", self.artist.clone()),
+            ("Album Artist", self.album_artist.clone()),
+            ("Album", self.album.clone()),
+            ("Year", self.year.to_string()),
+            ("Track Number", self.track_number.to_string()),
+            ("Duration", utils::format_time(self.duration.as_secs() as usize)),
+        ];
+
+        for (i, (label, val)) in fields.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{:<14} {}", format!("{}:", label), val)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]

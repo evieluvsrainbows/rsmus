@@ -6,11 +6,11 @@ use crate::{
 use cursive::{
     CbSink, Cursive,
     event::{self, Event, Key},
-    menu,
+    menu::Tree as MenuTree,
     theme::{Effect, Style, Theme},
     utils::markup::StyledString,
     view::{Resizable, Scrollable},
-    views::{Dialog, DummyView, LinearLayout, NamedView, Panel, ScrollView, SelectView, TextView},
+    views::{DummyView, LinearLayout, NamedView, Panel, ScrollView, SelectView, TextView},
 };
 use rayon::prelude::*;
 use std::{
@@ -56,8 +56,10 @@ fn spawn_db_worker() -> Sender<DbTask> {
 }
 
 /// Initializes the cursive menubar and sets the theme to be used by it.
-pub(crate) fn setup_cursive_theme_and_menu(siv: &mut Cursive) {
-    siv.menubar().add_subtree("File", menu::Tree::new().leaf("Quit", |s| s.quit()));
+pub(crate) fn setup_cursive_theme_and_menu(siv: &mut Cursive, mp: SharedState<MusicPlayer>) {
+    let menubar = siv.menubar();
+    menubar.add_subtree("File", MenuTree::new().leaf("Quit (q)", |s| s.quit()));
+    menubar.add_subtree("Song", MenuTree::new().leaf("Show Metadata\u{2026}", move |s| ui_utils::show_metadata(s, mp.clone())));
     siv.set_autohide_menu(false);
     siv.set_theme(Theme::terminal_default());
 }
@@ -71,6 +73,7 @@ pub(crate) fn get_initial_expanded_states(hierarchy: &TrackHierarchy) -> (Shared
             initial_albums.insert((artist.clone(), album.clone()));
         }
     }
+
     (Arc::new(Mutex::new(initial_artists)), Arc::new(Mutex::new(initial_albums)))
 }
 
@@ -200,13 +203,13 @@ pub(crate) fn construct_library_view(
 pub(crate) fn setup_ui_layout(
     siv: &mut Cursive,
     hierarchy: &TrackHierarchy,
-    music_player: SharedState<MusicPlayer>,
+    mp: SharedState<MusicPlayer>,
     expanded_artists: SharedState<BTreeSet<String>>,
     expanded_albums: SharedState<BTreeSet<(String, String)>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut select_view = SelectView::<TreeItemKey>::new();
     let hierarchy_for_submit = hierarchy.clone();
-    let player_for_submit = Arc::clone(&music_player);
+    let player_for_submit = mp.clone();
 
     select_view.set_on_submit(move |s, item_key| {
         let target_idx = match item_key {
@@ -236,7 +239,7 @@ pub(crate) fn setup_ui_layout(
     });
 
     let (current_idx, is_paused, initial_info, initial_sec, initial_duration) = {
-        let mp = music_player.lock().map_err(|_| "Poisoned mutex")?;
+        let mp = mp.lock().map_err(|_| "Poisoned mutex")?;
         let cur_idx = mp.current_index;
         let is_p = mp.is_paused;
         let info = mp.current_track_info().to_string();
@@ -276,10 +279,10 @@ pub(crate) fn setup_ui_layout(
     Ok(())
 }
 
-pub(crate) fn build_hierarchy(music_player: &SharedState<MusicPlayer>) -> Result<TrackHierarchy, Box<dyn Error>> {
+pub(crate) fn build_hierarchy(mp: &SharedState<MusicPlayer>) -> Result<TrackHierarchy, Box<dyn Error>> {
     let mut hierarchy: TrackHierarchy = BTreeMap::new();
     {
-        let mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
+        let mp = mp.lock().map_err(|_| "Mutex poisoned")?;
         for (i, track) in mp.queue.iter().enumerate() {
             let album_artist = if track.metadata.album_artist.is_empty() {
                 track.metadata.artist.clone()
@@ -300,14 +303,14 @@ pub(crate) fn build_hierarchy(music_player: &SharedState<MusicPlayer>) -> Result
     Ok(hierarchy)
 }
 
-pub(crate) fn handle_repeat_mode(siv: &mut Cursive, music_player: Arc<Mutex<MusicPlayer>>) {
+pub(crate) fn handle_repeat_mode(siv: &mut Cursive, mp: Arc<Mutex<MusicPlayer>>) {
     let repeat_sink = siv.cb_sink().clone();
     thread::spawn(move || {
         let mut prev_repeat_mode = None;
         loop {
             thread::sleep(Duration::from_millis(150));
 
-            let Ok(mp) = music_player.lock() else { break };
+            let Ok(mp) = mp.lock() else { break };
             let current_repeat_mode = mp.repeat_mode;
             drop(mp);
 
@@ -332,17 +335,17 @@ pub(crate) fn handle_repeat_mode(siv: &mut Cursive, music_player: Arc<Mutex<Musi
 
 pub(crate) fn register_callbacks(
     siv: &mut Cursive,
-    music_player: Arc<Mutex<MusicPlayer>>,
+    mp: Arc<Mutex<MusicPlayer>>,
     hierarchy: &TrackHierarchy,
     expanded_artists: SharedState<BTreeSet<String>>,
     expanded_albums: SharedState<BTreeSet<(String, String)>>,
 ) {
     let db_tx = spawn_db_worker();
 
-    let artists_for_space = Arc::clone(&expanded_artists);
-    let albums_for_space = Arc::clone(&expanded_albums);
+    let artists_for_space = expanded_artists.clone();
+    let albums_for_space = expanded_albums.clone();
     let hierarchy_for_space = hierarchy.clone();
-    let player_for_space = Arc::clone(&music_player);
+    let player_for_space = mp.clone();
 
     siv.add_global_callback(' ', move |s| {
         if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
@@ -384,31 +387,11 @@ pub(crate) fn register_callbacks(
     });
 
     // Key binding for opening the track metadata dialog.
-    let player_for_meta = Arc::clone(&music_player);
-    siv.add_global_callback('m', move |s| {
-        if let Ok(mp) = player_for_meta.lock() {
-            if let Some(track) = mp.queue.get(mp.current_index) {
-                let m = &track.metadata;
-                let meta_text = format!(
-                    "Title: {}\nArtist: {}\nAlbum Artist: {}\nAlbum: {}\nYear: {}\nTrack Number: {}\nDuration: {}\nPath: {}",
-                    m.title,
-                    m.artist,
-                    m.album_artist,
-                    m.album,
-                    m.year,
-                    m.track_number,
-                    utils::format_time(m.duration.as_secs() as usize),
-                    track.path.display()
-                );
-                s.add_layer(Dialog::around(TextView::new(meta_text)).title(format!("{} - Metadata", m.title)).button("Close", |s| {
-                    s.pop_layer();
-                }));
-            }
-        }
-    });
+    let player_for_metadata = mp.clone();
+    siv.add_global_callback('m', move |s| ui_utils::show_metadata(s, player_for_metadata.clone()));
 
     // Key binding for playing or pausing the current track.
-    let player_for_playback = Arc::clone(&music_player);
+    let player_for_playback = mp.clone();
     siv.add_global_callback('c', move |_| {
         if let Ok(mut mp) = player_for_playback.lock() {
             mp.play_pause();
@@ -416,7 +399,7 @@ pub(crate) fn register_callbacks(
     });
 
     // Key binding for toggling the repeat state.
-    let player_for_repeat = Arc::clone(&music_player);
+    let player_for_repeat = mp.clone();
     siv.add_global_callback('r', move |_| {
         if let Ok(mut mp) = player_for_repeat.lock() {
             mp.toggle_repeat_mode();
@@ -431,7 +414,7 @@ pub(crate) fn register_callbacks(
     });
 
     // Key binding for rewinding a track by 10 seconds.
-    let player_for_rewind = Arc::clone(&music_player);
+    let player_for_rewind = mp.clone();
     siv.add_global_callback('b', move |_| {
         if let Ok(mut mp) = player_for_rewind.lock() {
             let _ = mp.seek_backward();
@@ -439,7 +422,7 @@ pub(crate) fn register_callbacks(
     });
 
     // Key binding for fast forwarding a track by 10 seconds.
-    let player_for_forward = Arc::clone(&music_player);
+    let player_for_forward = mp.clone();
     siv.add_global_callback('n', move |_| {
         if let Ok(mut mp) = player_for_forward.lock() {
             let _ = mp.seek_forward();
@@ -447,7 +430,7 @@ pub(crate) fn register_callbacks(
     });
 
     // Key binding for rewinding to the previous track.
-    let player_for_prev = Arc::clone(&music_player);
+    let player_for_prev = mp.clone();
     siv.add_global_callback(Event::Key(Key::Left), move |_| {
         if let Ok(mut mp) = player_for_prev.lock() {
             let _ = mp.previous();
@@ -456,7 +439,7 @@ pub(crate) fn register_callbacks(
 
     // Key binding for skipping to the next track.
     siv.add_global_callback(Event::Key(Key::Right), move |_| {
-        if let Ok(mut mp) = music_player.lock() {
+        if let Ok(mut mp) = mp.lock() {
             let _ = mp.skip();
         }
     });
@@ -467,14 +450,14 @@ pub(crate) fn register_callbacks(
 
 pub(crate) fn spawn_playback_thread(
     sink: CbSink,
-    music_player: SharedState<MusicPlayer>,
+    mp: SharedState<MusicPlayer>,
     hierarchy: TrackHierarchy,
     expanded_artists: SharedState<BTreeSet<String>>,
     expanded_albums: SharedState<BTreeSet<(String, String)>>,
 ) {
-    let player_for_thread = Arc::clone(&music_player);
-    let artists_for_thread = Arc::clone(&expanded_artists);
-    let albums_for_thread = Arc::clone(&expanded_albums);
+    let player_for_thread = mp.clone();
+    let artists_for_thread = expanded_artists.clone();
+    let albums_for_thread = expanded_albums.clone();
     let hierarchy_for_thread = hierarchy;
     let db_tx = spawn_db_worker();
 

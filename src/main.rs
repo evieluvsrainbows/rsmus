@@ -18,8 +18,9 @@ type SharedState<T> = Arc<Mutex<T>>;
 #[derive(Parser, Debug)]
 #[clap(about, version)]
 struct Args {
-    #[arg(short, long, value_name = "FOLDER")]
-    scan: Option<String>,
+    #[arg(short, long, value_name = "FOLDER", num_args = 1..)]
+    /// Scans a directory or directories to the database.
+    scan: Option<Vec<String>>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -27,8 +28,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut conn = Connection::open("rsmus.db")?;
     db::initialize_database(&conn)?;
 
-    if let Some(folder_path) = args.scan {
-        db::scan_directory_to_db(&mut conn, &folder_path)?;
+    if let Some(folder_paths) = args.scan {
+        db::scan_directories_to_db(&mut conn, &folder_paths)?;
         return Ok(());
     }
 
@@ -44,11 +45,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (expanded_artists, expanded_albums) = ui::get_initial_expanded_states(&hierarchy);
     let mut siv = cursive::default();
 
-    ui::setup_cursive_theme_and_menu(&mut siv);
-    ui::setup_ui_layout(&mut siv, &hierarchy, Arc::clone(&music_player), Arc::clone(&expanded_artists), Arc::clone(&expanded_albums))?;
-    ui::handle_repeat_mode(&mut siv, Arc::clone(&music_player));
-    ui::register_callbacks(&mut siv, Arc::clone(&music_player), &hierarchy, Arc::clone(&expanded_artists), Arc::clone(&expanded_albums));
-    ui::spawn_playback_thread(siv.cb_sink().clone(), Arc::clone(&music_player), hierarchy, expanded_artists, expanded_albums);
+    ui::setup_cursive_theme_and_menu(&mut siv, music_player.clone());
+    ui::setup_ui_layout(&mut siv, &hierarchy, music_player.clone(), expanded_artists.clone(), expanded_albums.clone())?;
+    ui::handle_repeat_mode(&mut siv, music_player.clone());
+    ui::register_callbacks(&mut siv, music_player.clone(), &hierarchy, expanded_artists.clone(), expanded_albums.clone());
+    ui::spawn_playback_thread(siv.cb_sink().clone(), music_player.clone(), hierarchy, expanded_artists, expanded_albums);
 
     siv.run();
 

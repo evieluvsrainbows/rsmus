@@ -2,7 +2,7 @@ use crate::player::{RepeatMode, Track, TrackMetadata};
 use crate::utils;
 use audiotags::Tag;
 use rayon::prelude::*;
-use rusqlite::{Connection, Result, params};
+use rusqlite::{Connection, OptionalExtension, Result, params};
 use std::{
     collections::HashSet,
     error::Error,
@@ -79,18 +79,40 @@ fn extract_track_metadata(filepath: &Path) -> TrackMetadata {
     }
 }
 
-pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
-    let input_path = input_dir.as_ref();
-    if !input_path.is_dir() {
-        return Err(format!("Specified path is not a valid directory: {}", input_path.display()).into());
+/// Scans a given directory or directories into the SQLite database.
+pub(crate) fn scan_directories_to_db<I, P>(conn: &mut Connection, dirs: I) -> Result<(), Box<dyn Error>>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<Path>,
+{
+    let mut valid_dirs_count = 0;
+    let mut entries = Vec::new();
+
+    for dir in dirs {
+        let input_path = dir.as_ref();
+        if !input_path.is_dir() {
+            eprintln!("Warning: Skipping invalid directory path: {}", input_path.display());
+            continue;
+        }
+        collect_audio_files(input_path, &mut entries)?;
+        valid_dirs_count += 1;
     }
 
-    let mut entries = Vec::new();
-    collect_audio_files(input_path, &mut entries)?;
+    if valid_dirs_count == 0 {
+        return Err("No valid input directories were provided.".into());
+    }
 
     if entries.is_empty() {
-        return Err(format!("No supported music files found in directory: {}", input_path.display()).into());
+        return Err("No supported music files found in any of the specified directories.".into());
     }
+
+    // prior to feeding the entries vec into the scanned_tracks array, ensure that
+    // the entries array has been sorted and deduplicated. this will avoid cases where
+    // if a user scans both a directory and a subdirectory within the same directory,
+    // track_count won't show double the tracks that have actually been added to the
+    // database.
+    entries.sort();
+    entries.dedup();
 
     let scanned_tracks: Vec<Track> = entries
         .into_par_iter()
@@ -102,32 +124,98 @@ pub(crate) fn scan_directory_to_db(conn: &mut Connection, input_dir: impl AsRef<
 
     let album_count = scanned_tracks.iter().map(|t| &t.metadata.album).collect::<HashSet<_>>().len();
     let track_count = scanned_tracks.len();
+    let mut updated_path_count = 0;
 
     let tx = conn.transaction()?;
     {
-        let mut stmt = tx.prepare(
+        let current_track_id: Option<i64> = tx
+            .query_row("SELECT value FROM settings WHERE key = 'last_track_index'", [], |row| {
+                let val_str: String = row.get(0)?;
+                Ok(val_str.parse::<i64>().unwrap_or(-1))
+            })
+            .optional()?;
+
+        let mut select_existing_stmt = tx.prepare("SELECT id, path FROM tracks WHERE title = ?1 AND artist = ?2 LIMIT 1")?;
+        let mut update_stmt = tx.prepare(
+            "UPDATE tracks
+             SET album_artist = ?1, album = ?2, track_number = ?3, year = ?4, duration = ?5, path = ?6
+             WHERE id = ?7",
+        )?;
+
+        let mut insert_stmt = tx.prepare(
             "INSERT OR IGNORE INTO tracks (title, artist, album_artist, album, track_number, year, duration, path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
 
         for track in &scanned_tracks {
             let path_str = track.path.to_str().ok_or("Path contains invalid UTF-8")?;
+            let existing_record: Option<(i64, String)> = select_existing_stmt
+                .query_row(params![track.metadata.title, track.metadata.artist], |row| Ok((row.get(0)?, row.get(1)?)))
+                .optional()?;
 
-            stmt.execute(params![
-                track.metadata.title,
-                track.metadata.artist,
-                track.metadata.album_artist,
-                track.metadata.album,
-                track.metadata.track_number,
-                track.metadata.year,
-                track.metadata.duration.as_secs() as i64,
-                path_str
-            ])?;
+            if let Some((id, existing_path)) = existing_record {
+                update_stmt.execute(params![
+                    track.metadata.album_artist,
+                    track.metadata.album,
+                    track.metadata.track_number,
+                    track.metadata.year,
+                    track.metadata.duration.as_secs() as i64,
+                    path_str,
+                    id
+                ])?;
+
+                if existing_path != path_str {
+                    updated_path_count += 1;
+                }
+            } else {
+                insert_stmt.execute(params![
+                    track.metadata.title,
+                    track.metadata.artist,
+                    track.metadata.album_artist,
+                    track.metadata.album,
+                    track.metadata.track_number,
+                    track.metadata.year,
+                    track.metadata.duration.as_secs() as i64,
+                    path_str
+                ])?;
+            }
+        }
+
+        let mut select_all_stmt = tx.prepare("SELECT id, path FROM tracks")?;
+        let existing_tracks = select_all_stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let path: String = row.get(1)?;
+            Ok((id, path))
+        })?;
+
+        let mut active_track_removed = false;
+        let mut delete_stmt = tx.prepare("DELETE FROM tracks WHERE id = ?1")?;
+        for track_res in existing_tracks {
+            let (id, path_str) = track_res?;
+            let path = Path::new(&path_str);
+            if !path.exists() {
+                delete_stmt.execute(params![id])?;
+                println!("Deleted track with path {} from database as it no longer exists.", path.display());
+                if Some(id) == current_track_id {
+                    active_track_removed = true;
+                }
+            }
+        }
+
+        if active_track_removed {
+            tx.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_index', '0')", [])?;
+            tx.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_progress', '0')", [])?;
         }
     }
     tx.commit()?;
 
-    println!("Successfully processed {} tracks across {} albums for database synchronization.", track_count, album_count);
+    let track_label = if track_count == 1 { "track" } else { "tracks" };
+    let album_label = if album_count == 1 { "album" } else { "albums" };
+    let dir_label = if valid_dirs_count == 1 { "directory" } else { "directories" };
+    if updated_path_count > 0 {
+        println!("Updated paths for {updated_path_count} existing {track_label}.");
+    }
+    println!("Successfully synced {track_count} {track_label} across {album_count} {album_label} and {valid_dirs_count} {dir_label} to the database.");
     Ok(())
 }
 
