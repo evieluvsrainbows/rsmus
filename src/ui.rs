@@ -125,9 +125,7 @@ pub(crate) fn construct_library_view(
                 }
 
                 let icon = if is_current_track { if is_paused { "⏸ " } else { "♫ " } } else { "" };
-
                 let artist_extra = if m.album_artist != m.artist { format!(" ({})", m.artist) } else { String::new() };
-
                 let track_line = format!("{child_prefix}    {track_branch} {}. {icon}{}{artist_extra} [{duration_str}]", m.track_number, m.title);
 
                 select_view.add_item(track_line, track_key);
@@ -357,9 +355,9 @@ pub(crate) fn register_callbacks(
         }
     });
 
-    let player_for_c = Arc::clone(&music_player);
+    let player_for_playback = Arc::clone(&music_player);
     siv.add_global_callback('c', move |_| {
-        if let Ok(mut mp) = player_for_c.lock() {
+        if let Ok(mut mp) = player_for_playback.lock() {
             mp.play_pause();
         }
     });
@@ -381,6 +379,25 @@ pub(crate) fn register_callbacks(
         }
     });
 
+    // keybinding callback for rewinding the currently playing
+    // track by 10 seconds
+    let player_for_rewind = Arc::clone(&music_player);
+    siv.add_global_callback('b', move |_| {
+        if let Ok(mut mp) = player_for_rewind.lock() {
+            let _ = mp.seek_backward();
+        }
+    });
+
+    // keybinding callback for forwarding the currently plaiyng
+    // track by 10 seconds
+    let player_for_forward = Arc::clone(&music_player);
+    siv.add_global_callback('n', move |_| {
+        if let Ok(mut mp) = player_for_forward.lock() {
+            let _ = mp.seek_forward();
+        }
+    });
+
+    // keybinding callback for going back a track
     let player_for_prev = Arc::clone(&music_player);
     siv.add_global_callback(Event::Key(Key::Left), move |_| {
         if let Ok(mut mp) = player_for_prev.lock() {
@@ -388,6 +405,7 @@ pub(crate) fn register_callbacks(
         }
     });
 
+    // keybinding callback for going forward a track
     siv.add_global_callback(Event::Key(Key::Right), move |_| {
         if let Ok(mut mp) = music_player.lock() {
             let _ = mp.skip();

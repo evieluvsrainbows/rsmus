@@ -307,6 +307,49 @@ impl MusicPlayer {
         self.play_index(index, Duration::ZERO, false)
     }
 
+    pub(crate) fn get_elapsed(&self) -> Duration {
+        if self.is_paused { self.paused_elapsed } else { self.track_start_time.elapsed() }
+    }
+
+    pub(crate) fn seek_relative(&mut self, seconds: f64) {
+        let Some(track) = self.queue.get(self.current_index) else {
+            return;
+        };
+
+        let current_pos = self.get_elapsed();
+        let total_duration = track.metadata.duration;
+
+        if seconds >= 0.0 {
+            let offset = Duration::from_secs_f64(seconds);
+            let target_pos = (current_pos + offset).min(total_duration);
+            if self.player.try_seek(target_pos).is_ok() {
+                self.update_timer_state(target_pos);
+            } else {
+                let _ = self.play_index(self.current_index, target_pos, self.is_paused);
+            }
+        } else {
+            let offset = Duration::from_secs_f64(seconds.abs());
+            let target_pos = current_pos.saturating_sub(offset);
+            let _ = self.play_index(self.current_index, target_pos, self.is_paused);
+        }
+    }
+
+    fn update_timer_state(&mut self, target_pos: Duration) {
+        if self.is_paused {
+            self.paused_elapsed = target_pos;
+        } else {
+            self.track_start_time = Instant::now() - target_pos;
+        }
+    }
+
+    pub(crate) fn seek_forward(&mut self) {
+        self.seek_relative(10.0);
+    }
+
+    pub(crate) fn seek_backward(&mut self) {
+        self.seek_relative(-10.0);
+    }
+
     pub(crate) fn current_track_info(&self) -> String {
         if let Some(track) = self.queue.get(self.current_index) {
             let t = &track.metadata;
@@ -328,7 +371,7 @@ impl MusicPlayer {
             return (0, 100);
         }
 
-        let elapsed = if self.is_paused { self.paused_elapsed } else { self.track_start_time.elapsed() };
+        let elapsed = self.get_elapsed();
         let current_secs = elapsed.as_secs() as usize;
 
         (current_secs.min(total_secs), total_secs)
