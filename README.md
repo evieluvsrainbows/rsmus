@@ -70,5 +70,5 @@ The following table contains a list of keybindings used by rsmus for its various
 
 ## Licence
 
-This project is licenced under the terms of the Apache Licence; please see the [LICENCE](LICENCE) file for the full
+This project is licenced under the terms of the Apache Licence; please see the [LICENCE](LICENSE) file for the full
 terms of the Apache Licence as they govern how the rsmus project may be used, redistributed, or modified.
