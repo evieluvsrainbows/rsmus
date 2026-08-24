@@ -19,7 +19,8 @@ cargo run --release -- --scan <directory> && cargo run --release
 
 For future app launches, if there is no need to scan additional music into the database, only `cargo run --release` is needed.
 
-**NOTE**: rsmus *might* be added to crates.io later on as a directly installable binary when it is determined to be stable
+> ![NOTE]
+> rsmus *might* be added to crates.io later on as a directly installable binary when it is determined to be stable
 enough, but it is not guaranteed that it will be added.
 
 ## Features
@@ -31,13 +32,27 @@ The following is a list of features currently offered by rsmus. Additional featu
 * Basic persistence - the last played track and its track progress persists across app launches.
 * Metdata dialog - shows the track metadata of the currently playing track.
 
- **NOTE**: Collapsed/expanded states for artists or albums do not yet persist across app launches, but it is eventually planned
+> ![NOTE]
+> Collapsed/expanded states for artists or albums do not yet persist across app launches, but it is eventually planned
 to support this.
+
+## Performance
+Please note that performance of rsmus with large media libraries has not been tested. I have a small local media library
+consisting of ~75 tracks, and observed performance has been fine from what has been observed with that number of tracks on
+my M3 Max MacBook Pro when running rsmus in the [ghostty](https://ghostty.org) terminal emulator, but I have not tested it
+on any other machines, hardware, or terminal emulators. Therefore, your mileage may vary on how rsmus performs on your particular
+machine and terminal emulator, so if any issues with performance arise, please file an issue on GitHub and I will take a look, or if
+you know your way around Rust programming, feel free to submit a pull request containing any potential performance optimisations.
+
+As rsmus' main backend libraries (rusqlite, cursive) are synchronous rather than asynchronous, it is primarily single-threaded. A move
+to async would be difficult without a migration to an async-compatible TUI library and SQLite wrapper like ratatui and sqlx, and that
+kind of move is not yet planned.
 
 ## Keyboard shortcuts
 The following table contains a list of keybindings used by rsmus for its various features. 
 
-**NOTE**: These keyboard shortcuts are currently hardcoded and cannot yet be customized or rebound.
+> ![NOTE]
+> These keyboard shortcuts are currently hardcoded and cannot yet be customized or rebound.
 
 | Function                | Shortcut         |
 | -------------           | -------------    |
@@ -50,18 +65,6 @@ The following table contains a list of keybindings used by rsmus for its various
 | Toggle Repeat State     | `r`              |
 | View Track Metadata     | `m`              |
 | Quit                    | `q`              |
-
-## Note on Performance
-Please note that performance of rsmus with large media libraries has not been tested. I have a small local media library
-consisting of ~75 tracks, and observed performance has been fine from what has been observed with that number of tracks on
-my M3 Max MacBook Pro when running rsmus in the [ghostty](https://ghostty.org) terminal emulator, but I have not tested it
-on any other machines, hardware, or terminal emulators. Therefore, your mileage may vary on how rsmus performs on your particular
-machine and terminal emulator, so if any issues with performance arise, please file an issue on GitHub and I will take a look, or if
-you know your way around Rust programming, feel free to submit a pull request containing any potential performance optimisations.
-
-As rsmus' main backend libraries (rusqlite, cursive) are synchronous rather than asynchronous, it is primarily single-threaded. A move
-to async would be difficult without a migration to an async-compatible TUI library and SQLite wrapper like ratatui and sqlx, and that
-kind of move is not yet planned.
 
 ## Licence
 
