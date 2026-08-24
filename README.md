@@ -19,7 +19,7 @@ cargo run --release -- --scan <directory> && cargo run --release
 
 For future app launches, if there is no need to scan additional music into the database, only `cargo run --release` is needed.
 
-> ![NOTE]
+> [!NOTE]
 > rsmus *might* be added to crates.io later on as a directly installable binary when it is determined to be stable
 enough, but it is not guaranteed that it will be added.
 
@@ -32,7 +32,7 @@ The following is a list of features currently offered by rsmus. Additional featu
 * Basic persistence - the last played track and its track progress persists across app launches.
 * Metdata dialog - shows the track metadata of the currently playing track.
 
-> ![NOTE]
+> [!NOTE]
 > Collapsed/expanded states for artists or albums do not yet persist across app launches, but it is eventually planned
 to support this.
 
@@ -51,7 +51,7 @@ kind of move is not yet planned.
 ## Keyboard shortcuts
 The following table contains a list of keybindings used by rsmus for its various features. 
 
-> ![NOTE]
+> [!NOTE]
 > These keyboard shortcuts are currently hardcoded and cannot yet be customized or rebound.
 
 | Function                | Shortcut         |
