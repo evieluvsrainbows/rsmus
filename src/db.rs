@@ -1,16 +1,17 @@
-use crate::player::{RepeatMode, Track, TrackMetadata};
-use crate::utils;
 use audiotags::Tag;
 use rayon::prelude::*;
 use rusqlite::{Connection, OptionalExtension, Result, params};
 use std::{
-    collections::HashSet,
+    collections::BTreeSet,
     error::Error,
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
     time::Duration,
 };
+
+use crate::player::{RepeatMode, Track, TrackMetadata};
+use crate::utils;
 
 pub(crate) fn initialize_database(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -80,7 +81,7 @@ fn extract_track_metadata(filepath: &Path) -> TrackMetadata {
 }
 
 /// Scans a given directory or directories into the SQLite database.
-pub(crate) fn scan_directories_to_db<I, P>(conn: &mut Connection, dirs: I) -> Result<(), Box<dyn Error>>
+pub(crate) fn scan_directories_to_db<I, P>(conn: &mut Connection, dirs: I) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     I: IntoIterator<Item = P>,
     P: AsRef<Path>,
@@ -118,11 +119,11 @@ where
         .into_par_iter()
         .map(|path| {
             let metadata = extract_track_metadata(&path);
-            Track { metadata, path }
+            Track::new(metadata, path)
         })
         .collect();
 
-    let album_count = scanned_tracks.iter().map(|t| &t.metadata.album).collect::<HashSet<_>>().len();
+    let album_count = scanned_tracks.iter().map(|t| &t.metadata.album).collect::<BTreeSet<_>>().len();
     let track_count = scanned_tracks.len();
     let mut updated_path_count = 0;
 
@@ -136,13 +137,13 @@ where
             .optional()?;
 
         let mut select_existing_stmt = tx.prepare("SELECT id, path FROM tracks WHERE title = ?1 AND artist = ?2 LIMIT 1")?;
-        let mut update_stmt = tx.prepare(
+        let mut update_tx = tx.prepare(
             "UPDATE tracks
              SET album_artist = ?1, album = ?2, track_number = ?3, year = ?4, duration = ?5, path = ?6
              WHERE id = ?7",
         )?;
 
-        let mut insert_stmt = tx.prepare(
+        let mut insert_tx = tx.prepare(
             "INSERT OR IGNORE INTO tracks (title, artist, album_artist, album, track_number, year, duration, path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
@@ -154,7 +155,7 @@ where
                 .optional()?;
 
             if let Some((id, existing_path)) = existing_record {
-                update_stmt.execute(params![
+                update_tx.execute(params![
                     track.metadata.album_artist,
                     track.metadata.album,
                     track.metadata.track_number,
@@ -168,7 +169,7 @@ where
                     updated_path_count += 1;
                 }
             } else {
-                insert_stmt.execute(params![
+                insert_tx.execute(params![
                     track.metadata.title,
                     track.metadata.artist,
                     track.metadata.album_artist,
@@ -189,13 +190,13 @@ where
         })?;
 
         let mut active_track_removed = false;
-        let mut delete_stmt = tx.prepare("DELETE FROM tracks WHERE id = ?1")?;
+        let mut delete_tx = tx.prepare("DELETE FROM tracks WHERE id = ?1")?;
         for track_res in existing_tracks {
             let (id, path_str) = track_res?;
             let path = Path::new(&path_str);
             if !path.exists() {
-                delete_stmt.execute(params![id])?;
-                println!("Deleted track with path {} from database as it no longer exists.", path.display());
+                delete_tx.execute(params![id])?;
+                println!("Removed track with id {id} and path {} from the database as it no longer exists.", path.display());
                 if Some(id) == current_track_id {
                     active_track_removed = true;
                 }
@@ -203,19 +204,23 @@ where
         }
 
         if active_track_removed {
-            tx.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_index', '0')", [])?;
-            tx.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_progress', '0')", [])?;
+            tx.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_index', '0'), ('last_track_progress', '0')", [])?;
+            println!("Reset the last known track in the database as it was removed from the library.")
         }
     }
+
     tx.commit()?;
 
     let track_label = if track_count == 1 { "track" } else { "tracks" };
     let album_label = if album_count == 1 { "album" } else { "albums" };
     let dir_label = if valid_dirs_count == 1 { "directory" } else { "directories" };
+
     if updated_path_count > 0 {
         println!("Updated paths for {updated_path_count} existing {track_label}.");
     }
+
     println!("Successfully synced {track_count} {track_label} across {album_count} {album_label} and {valid_dirs_count} {dir_label} to the database.");
+
     Ok(())
 }
 
@@ -233,8 +238,10 @@ pub(crate) fn load_repeat_mode(conn: &Connection) -> RepeatMode {
 }
 
 pub(crate) fn save_last_played_state(conn: &Connection, track_index: usize, progress_secs: usize) -> Result<()> {
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_index', ?1)", [track_index.to_string()])?;
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_progress', ?1)", [progress_secs.to_string()])?;
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('last_track_index', ?1), ('last_track_progress', ?2)",
+        [track_index.to_string(), progress_secs.to_string()],
+    )?;
     Ok(())
 }
 
@@ -273,6 +280,7 @@ pub(crate) fn fetch_sorted_tracks_from_db(conn: &Connection) -> Result<Vec<Track
                 duration: Duration::from_secs(row.get::<_, i64>(6)? as u64),
             },
             path: PathBuf::from(path_str),
+            album_range: (0, 0),
         })
     })?
     .collect()

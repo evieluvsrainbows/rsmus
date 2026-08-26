@@ -2,11 +2,6 @@ mod dialogs;
 pub(crate) mod library;
 mod prompts;
 
-use crate::{
-    SharedState, TrackHierarchy, db,
-    player::{MusicPlayer, RepeatMode},
-    utils,
-};
 use cursive::{
     CbSink, Cursive,
     event::{self, Event, Key},
@@ -24,6 +19,12 @@ use std::{
     },
     thread,
     time::Duration,
+};
+
+use crate::{
+    SharedState, TrackHierarchy, db,
+    player::{MusicPlayer, RepeatMode},
+    utils,
 };
 
 pub(crate) enum DbTask {
@@ -72,7 +73,7 @@ pub(crate) fn setup_ui_layout(
     mp: SharedState<MusicPlayer>,
     expanded_artists: SharedState<BTreeSet<String>>,
     expanded_albums: SharedState<BTreeSet<(String, String)>>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut select_view = SelectView::<TreeItemKey>::new();
     let hierarchy_for_submit = hierarchy.clone();
     let player_for_submit = mp.clone();
@@ -332,7 +333,6 @@ pub(crate) fn spawn_playback_thread(
             let is_paused = mp.is_paused;
             let index_changed = current_idx != prev_idx;
             let paused_changed = is_paused != prev_paused;
-
             if index_changed || paused_changed {
                 if let Some(track) = mp.queue.get(current_idx) {
                     let t = &track.metadata;

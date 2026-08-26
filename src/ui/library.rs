@@ -1,19 +1,20 @@
-use crate::{
-    SharedState, TrackHierarchy,
-    player::{MusicPlayer, Track},
-    ui::TreeItemKey,
-    utils,
-};
 use cursive::{
     theme::{Effect, Style},
     utils::markup::StyledString,
     views::SelectView,
 };
-use rayon::prelude::*;
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     error::Error,
     sync::{Arc, Mutex},
+};
+
+use crate::{
+    SharedState, TrackHierarchy,
+    player::{MusicPlayer, Track},
+    ui::TreeItemKey,
+    utils,
 };
 
 pub(crate) fn get_initial_expanded_states(hierarchy: &TrackHierarchy) -> (SharedState<BTreeSet<String>>, SharedState<BTreeSet<(String, String)>>) {
@@ -25,7 +26,6 @@ pub(crate) fn get_initial_expanded_states(hierarchy: &TrackHierarchy) -> (Shared
             initial_albums.insert((artist.clone(), album.clone()));
         }
     }
-
     (Arc::new(Mutex::new(initial_artists)), Arc::new(Mutex::new(initial_albums)))
 }
 
@@ -152,26 +152,31 @@ pub(crate) fn construct_view(
     }
 }
 
-pub(crate) fn build_hierarchy(mp: &SharedState<MusicPlayer>) -> Result<TrackHierarchy, Box<dyn Error>> {
+pub(crate) fn build_hierarchy(mp: &SharedState<MusicPlayer>) -> Result<TrackHierarchy, Box<dyn Error + Send + Sync>> {
     let mut hierarchy: TrackHierarchy = BTreeMap::new();
     {
         let mp = mp.lock().map_err(|_| "Mutex poisoned")?;
         for (i, track) in mp.queue.iter().enumerate() {
             let album_artist = if track.metadata.album_artist.is_empty() {
-                track.metadata.artist.clone()
+                Cow::Borrowed(track.metadata.artist.as_str())
             } else {
-                track.metadata.album_artist.clone()
+                Cow::Borrowed(track.metadata.album_artist.as_str())
             };
-            let album = track.metadata.album.clone();
-            hierarchy.entry(album_artist).or_default().entry(album).or_default().push((i, track.clone()));
+
+            hierarchy
+                .entry(album_artist.into_owned())
+                .or_default()
+                .entry(track.metadata.album.clone())
+                .or_default()
+                .push((i, track.clone()));
         }
     }
 
-    hierarchy.par_iter_mut().for_each(|(_, albums)| {
-        albums.par_iter_mut().for_each(|(_, tracks)| {
+    for albums in hierarchy.values_mut() {
+        for tracks in albums.values_mut() {
             tracks.sort_unstable_by_key(|(_, track)| track.metadata.track_number);
-        });
-    });
+        }
+    }
 
     Ok(hierarchy)
 }

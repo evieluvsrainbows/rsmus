@@ -1,8 +1,3 @@
-use crate::{
-    SharedState,
-    player::{MusicPlayer, RepeatMode, Track},
-};
-
 use std::{
     error::Error,
     io::Write,
@@ -10,9 +5,14 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    SharedState,
+    player::{MusicPlayer, RepeatMode, Track},
+};
+
 /// Initializes and sets up the music player and its various attributes.
-pub(crate) fn initialize_player(playlist: Vec<Track>, repeat_mode: RepeatMode, last_index: usize, last_progress: usize) -> Result<SharedState<MusicPlayer>, Box<dyn Error>> {
-    let music_player = Arc::new(Mutex::new(MusicPlayer::new(playlist, None, repeat_mode)?));
+pub(crate) fn initialize_player(playlist: Vec<Track>, repeat_mode: RepeatMode, last_index: usize, last_progress: usize) -> Result<SharedState<MusicPlayer>, Box<dyn Error + Send + Sync>> {
+    let music_player = Arc::new(Mutex::new(MusicPlayer::new(playlist, repeat_mode)?));
     {
         let mut mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
         let valid_index = if last_index < mp.queue.len() { last_index } else { 0 };

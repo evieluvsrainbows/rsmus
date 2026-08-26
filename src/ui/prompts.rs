@@ -16,13 +16,12 @@ pub(crate) fn show_quit_prompt(siv: &mut Cursive) {
     siv.add_global_callback('y', |s| s.quit());
     siv.add_global_callback('Y', |s| s.quit());
 
-    let cancel_prompt = |s: &mut cursive::Cursive| {
-        s.clear_global_callbacks('y');
-        s.clear_global_callbacks('Y');
-        s.clear_global_callbacks('n');
-        s.clear_global_callbacks('N');
-
-        s.call_on_name("prompt_bar", |v: &mut TextView| {
+    let cancel_prompt = |siv: &mut cursive::Cursive| {
+        siv.clear_global_callbacks('y');
+        siv.clear_global_callbacks('Y');
+        siv.clear_global_callbacks('n');
+        siv.clear_global_callbacks('N');
+        siv.call_on_name("prompt_bar", |v: &mut TextView| {
             v.set_content("");
         });
     };

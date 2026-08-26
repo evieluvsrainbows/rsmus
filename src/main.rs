@@ -22,7 +22,7 @@ struct Args {
     scan: Option<Vec<String>>,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let args = Args::parse();
     let mut conn = Connection::open("rsmus.db")?;
     db::initialize_database(&conn)?;
