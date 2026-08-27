@@ -12,11 +12,11 @@ use crate::{
 
 /// Initializes and sets up the music player and its various attributes.
 pub(crate) fn initialize_player(playlist: Vec<Track>, repeat_mode: RepeatMode, last_index: usize, last_progress: usize) -> Result<SharedState<MusicPlayer>, Box<dyn Error + Send + Sync>> {
-    let music_player = Arc::new(Mutex::new(MusicPlayer::new(playlist, repeat_mode)?));
+    let offset = Duration::from_secs(last_progress as u64);
+    let music_player = Arc::new(Mutex::new(MusicPlayer::new(playlist, repeat_mode, Some(offset))?));
     {
         let mut mp = music_player.lock().map_err(|_| "Mutex poisoned")?;
         let valid_index = if last_index < mp.queue.len() { last_index } else { 0 };
-        let offset = Duration::from_secs(last_progress as u64);
         mp.play_index(valid_index, offset, true)?;
     }
     Ok(music_player)
