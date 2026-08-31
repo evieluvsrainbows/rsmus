@@ -284,8 +284,8 @@ impl MusicPlayer {
 
     /// Polls the result channel and caches completed audio decodes matching the current generation token.
     fn poll_preloaded(&mut self) {
-        while let Ok((r#gen, index, res)) = self.preload_rx.try_recv() {
-            if r#gen == self.preload_generation
+        while let Ok((preload_req, index, res)) = self.preload_rx.try_recv() {
+            if preload_req == self.preload_generation
                 && let Ok(source) = res
             {
                 self.preloaded_track = Some((index, source));
