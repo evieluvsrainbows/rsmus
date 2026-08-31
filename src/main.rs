@@ -11,7 +11,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-type TrackHierarchy = BTreeMap<String, BTreeMap<String, Vec<(usize, player::Track)>>>;
+use crate::player::Track;
+
+type TrackHierarchy = BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>;
 type SharedState<T> = Arc<Mutex<T>>;
 
 #[derive(Parser, Debug)]

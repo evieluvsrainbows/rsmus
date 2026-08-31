@@ -171,7 +171,7 @@ impl MusicPlayer {
 
         // Initialize Rodio audio sink hardware device and player stream.
         let handle = DeviceSinkBuilder::open_default_sink()?;
-        let player = Player::connect_new(&handle.mixer());
+        let player = Player::connect_new(handle.mixer());
 
         // Setup channel pipelines for preloader requests and incoming decoded sources.
         let (req_tx, req_rx) = channel::<PreloadRequest>();
@@ -199,10 +199,8 @@ impl MusicPlayer {
                     .and_then(|file| Decoder::try_from(BufReader::new(file)).map_err(|e| e.to_string()));
 
                 // Re-verify staleness before sending result back to prevent populating stale cache.
-                if latest_req.generation == worker_gen.load(Ordering::Relaxed) {
-                    if res_tx.send((latest_req.generation, latest_req.index, result)).is_err() {
-                        break; // Exit worker loop if the receiver hung up.
-                    }
+                if latest_req.generation == worker_gen.load(Ordering::Relaxed) && res_tx.send((latest_req.generation, latest_req.index, result)).is_err() {
+                    break; // Exit worker loop if the receiver hung up.
                 }
             }
         });
@@ -287,10 +285,10 @@ impl MusicPlayer {
     /// Polls the result channel and caches completed audio decodes matching the current generation token.
     fn poll_preloaded(&mut self) {
         while let Ok((r#gen, index, res)) = self.preload_rx.try_recv() {
-            if r#gen == self.preload_generation {
-                if let Ok(source) = res {
-                    self.preloaded_track = Some((index, source));
-                }
+            if r#gen == self.preload_generation
+                && let Ok(source) = res
+            {
+                self.preloaded_track = Some((index, source));
             }
         }
     }

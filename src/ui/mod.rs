@@ -94,13 +94,13 @@ pub(crate) fn setup_ui_layout(
             let _ = mp.jump_to(target_idx);
         }
 
-        if matches!(item_key, TreeItemKey::Album(..)) {
-            if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
-                let sv = scroll_view.get_inner_mut();
-                let target_key = TreeItemKey::Track(target_idx);
-                if let Some(pos) = (0..sv.len()).position(|i| sv.get_item(i).map_or(false, |(_, k)| *k == target_key)) {
-                    sv.set_selection(pos);
-                }
+        if matches!(item_key, TreeItemKey::Album(..))
+            && let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view")
+        {
+            let sv = scroll_view.get_inner_mut();
+            let target_key = TreeItemKey::Track(target_idx);
+            if let Some(pos) = (0..sv.len()).position(|i| sv.get_item(i).is_some_and(|(_, k)| *k == target_key)) {
+                sv.set_selection(pos);
             }
         }
     });
@@ -260,7 +260,7 @@ pub(crate) fn register_callbacks(
     let player_for_rewind = mp.clone();
     siv.add_global_callback('b', move |_| {
         if let Ok(mut mp) = player_for_rewind.lock() {
-            let _ = mp.seek_backward();
+            mp.seek_backward();
         }
     });
 
@@ -268,7 +268,7 @@ pub(crate) fn register_callbacks(
     let player_for_forward = mp.clone();
     siv.add_global_callback('n', move |_| {
         if let Ok(mut mp) = player_for_forward.lock() {
-            let _ = mp.seek_forward();
+            mp.seek_forward();
         }
     });
 
@@ -283,11 +283,11 @@ pub(crate) fn register_callbacks(
     // Key binding for skipping to the next track.
     siv.add_global_callback(Event::Key(Key::Right), move |_| {
         if let Ok(mut mp) = mp.lock() {
-            let _ = mp.skip();
+            mp.skip();
         }
     });
 
-    siv.add_global_callback('q', |s| prompts::show_quit_prompt(s));
+    siv.add_global_callback('q', prompts::show_quit_prompt);
     siv.add_global_callback(event::Key::Esc, |s| s.select_menubar());
 }
 
@@ -377,16 +377,16 @@ pub(crate) fn spawn_playback_thread(
                 s.call_on_name("track_info", |v: &mut TextView| v.set_content(track_text));
                 s.call_on_name("time_label", |v: &mut TextView| v.set_content(time_text));
 
-                if let Some(items) = view_items {
-                    if let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view") {
-                        let sv = scroll_view.get_inner_mut();
-                        sv.clear();
-                        for (label, key) in items {
-                            sv.add_item(label, key);
-                        }
-                        if let Some(idx) = selection_idx {
-                            sv.set_selection(idx);
-                        }
+                if let Some(items) = view_items
+                    && let Some(mut scroll_view) = s.find_name::<ScrollView<SelectView<TreeItemKey>>>("library_view")
+                {
+                    let sv = scroll_view.get_inner_mut();
+                    sv.clear();
+                    for (label, key) in items {
+                        sv.add_item(label, key);
+                    }
+                    if let Some(idx) = selection_idx {
+                        sv.set_selection(idx);
                     }
                 }
             }));

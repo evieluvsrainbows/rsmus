@@ -17,7 +17,9 @@ use crate::{
     utils,
 };
 
-pub(crate) fn get_initial_expanded_states(hierarchy: &TrackHierarchy) -> (SharedState<BTreeSet<String>>, SharedState<BTreeSet<(String, String)>>) {
+type ExpandedStates = (SharedState<BTreeSet<String>>, SharedState<BTreeSet<(String, String)>>);
+
+pub(crate) fn get_initial_expanded_states(hierarchy: &TrackHierarchy) -> ExpandedStates {
     let mut initial_artists = BTreeSet::new();
     let mut initial_albums = BTreeSet::new();
     for (artist, albums) in hierarchy {
@@ -30,7 +32,7 @@ pub(crate) fn get_initial_expanded_states(hierarchy: &TrackHierarchy) -> (Shared
 }
 
 pub(crate) fn generate_items(
-    hierarchy: &BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>,
+    hierarchy: &TrackHierarchy,
     expanded_artists: &BTreeSet<String>,
     expanded_albums: &BTreeSet<(&str, &str)>,
     current_track_idx: usize,
@@ -130,7 +132,7 @@ pub(crate) fn generate_items(
 
 pub(crate) fn construct_view(
     select_view: &mut SelectView<TreeItemKey>,
-    hierarchy: &BTreeMap<String, BTreeMap<String, Vec<(usize, Track)>>>,
+    hierarchy: &TrackHierarchy,
     expanded_artists: &BTreeSet<String>,
     expanded_albums: &BTreeSet<(&str, &str)>,
     current_track_idx: usize,
